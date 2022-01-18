@@ -135,7 +135,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
 
     //if the client is in a room, leave it
 
-    let room = client.room.lock().unwrap(); 
+    let mut room = client.room.lock().unwrap(); 
     if room.as_ref().is_some(){
         client_leave_room(client, true); 
     }
@@ -158,7 +158,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
             let mut clients = rooms[&room_name].clients.lock().unwrap(); 
             clients.insert(client.id,client.clone());
             println!("Client {} joined {}",client.id,&room_name);
-            
+            *room = Some(rooms.get(&room_name).unwrap().clone()); //we create an option and assign it back to the room
             //send a join message to everyone in the room
             for (_k,v) in clients.iter() {
                 send_client_join_message(v, client.id, &room_name);
@@ -329,10 +329,17 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<Mutex<Has
     //handle writing to the thread as needed
     println!("Writing process started");
 
-    read_handle.join().unwrap();
+    match read_handle.join(){
+        Ok(_)=>(),
+        Err(_)=>()
+    }
+    
     client.sender.send(vec![0]).unwrap();
     
-    write_handle.join().unwrap();
+    match write_handle.join() {
+        Ok(_)=>(),
+        Err(_)=>()
+    }
     println!("Client left");
     //now we can kill the client.  
     {
