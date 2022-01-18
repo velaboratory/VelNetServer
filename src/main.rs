@@ -85,7 +85,11 @@ fn send_client_join_message(to: &Arc<Client>, from: u32, room: &str){
     writeBuf.extend_from_slice(&(from).to_be_bytes()); //send everyone that the client id joined the room
     writeBuf.push(room.as_bytes().len() as u8); 
     writeBuf.extend_from_slice(room.as_bytes());
-    to.sender.send(writeBuf).unwrap();
+    let res = to.sender.send(writeBuf);
+    match res {
+        Ok(_) => println!("send successful"),
+        Err(_) => println!("send unsuccessful")
+    }
 }
 
 fn client_leave_room(mut client: &Arc<Client>, send_to_client: bool){
