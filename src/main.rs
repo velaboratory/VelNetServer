@@ -3,7 +3,6 @@ use std::thread;
 use std::net::{TcpListener, TcpStream};
 use std::collections::HashMap;
 use std::sync::{Arc,Mutex};
-use std::io;
 use std::sync::mpsc;
 use std::sync::mpsc::{SyncSender,Receiver};
 struct Client {
@@ -32,22 +31,22 @@ fn read_u8(stream: &mut TcpStream) -> u8 {
 fn read_u32(stream: &mut TcpStream) -> u32 {
     let mut buf:[u8;4] = [0; 4];
     stream.read_exact(&mut buf).unwrap();
-    let mut size = u32::from_be_bytes(buf);
+    let size = u32::from_be_bytes(buf);
     return size;
 }
-fn read_string(stream: &mut TcpStream) -> String {
+fn _read_string(stream: &mut TcpStream) -> String {
     let size = read_u32(stream);
     println!("Size in bytes: {}",size);
-    let mut stringBytes = vec![0;size as usize];
-    stream.read_exact(&mut stringBytes).unwrap();
-    return String::from_utf8(stringBytes).unwrap();
+    let mut string_bytes = vec![0;size as usize];
+    stream.read_exact(&mut string_bytes).unwrap();
+    return String::from_utf8(string_bytes).unwrap();
 }
 fn read_short_string(stream: &mut TcpStream) -> String {
     let size = read_u8(stream);
     println!("Size in bytes: {}",size);
-    let mut stringBytes = vec![0;size as usize];
-    stream.read_exact(&mut stringBytes).unwrap();
-    return String::from_utf8(stringBytes).unwrap();
+    let mut string_bytes = vec![0;size as usize];
+    stream.read_exact(&mut string_bytes).unwrap();
+    return String::from_utf8(string_bytes).unwrap();
 }
 
 fn read_vec(stream: &mut TcpStream) -> Vec<u8> {
@@ -57,7 +56,8 @@ fn read_vec(stream: &mut TcpStream) -> Vec<u8> {
     return message;
 }
 
-fn read_login_message(stream: &mut TcpStream, mut client: &Arc<Client>) {
+fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
+    //byte,shortstring,byte,shortstring
     println!("Got login message");
     let username = read_short_string(stream);
     let password = read_short_string(stream);
@@ -67,32 +67,33 @@ fn read_login_message(stream: &mut TcpStream, mut client: &Arc<Client>) {
     *client_user = username;
     let mut client_loggedin = client.logged_in.lock().unwrap();
     *client_loggedin = true;
-    let mut writeBuf = vec![];
-    writeBuf.push(0u8);
-    writeBuf.extend_from_slice(&(client.id).to_be_bytes()); //send the client the id
+    let mut write_buf = vec![];
+    write_buf.push(0u8);
+    write_buf.extend_from_slice(&(client.id).to_be_bytes()); //send the client the id
 
-    client.sender.send(writeBuf);
+    client.sender.send(write_buf).unwrap();
 }
 
-fn read_rooms_message(stream: &mut TcpStream, mut client: &Arc<Client>){
+fn read_rooms_message(_stream: &mut TcpStream, mut _client: &Arc<Client>){
 
 }
 
 fn send_client_join_message(to: &Arc<Client>, from: u32, room: &str){
-    //this message is 2u8, person_id_u32, room_name_len_u8, room_name_bytes
-    let mut writeBuf = vec![];
-    writeBuf.push(2u8);
-    writeBuf.extend_from_slice(&(from).to_be_bytes()); //send everyone that the client id joined the room
-    writeBuf.push(room.as_bytes().len() as u8); 
-    writeBuf.extend_from_slice(room.as_bytes());
-    let res = to.sender.send(writeBuf);
+    
+    //2u8, person_id_u32, room_name_len_u8, room_name_bytes
+    let mut write_buf = vec![];
+    write_buf.push(2u8);
+    write_buf.extend_from_slice(&(from).to_be_bytes()); //send everyone that the client id joined the room
+    write_buf.push(room.as_bytes().len() as u8); 
+    write_buf.extend_from_slice(room.as_bytes());
+    let res = to.sender.send(write_buf);
     match res {
         Ok(_) => println!("send successful"),
         Err(_) => println!("send unsuccessful")
     }
 }
 
-fn client_leave_room(mut client: &Arc<Client>, send_to_client: bool){
+fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
     //first remove the client from the room they are in
     
     let mut room = client.room.lock().unwrap();
@@ -102,7 +103,7 @@ fn client_leave_room(mut client: &Arc<Client>, send_to_client: bool){
             let room = room.as_ref().unwrap();
             println!("Client leaving current room {}",&room.name);
             let mut clients = room.clients.lock().unwrap();           
-            for (k,v) in clients.iter() {
+            for (_k,v) in clients.iter() {
                 if !send_to_client && v.id == client.id{
                     continue;
                 }
@@ -124,7 +125,8 @@ fn client_leave_room(mut client: &Arc<Client>, send_to_client: bool){
 
 }
 
-fn read_join_message(stream: &mut TcpStream, mut client: &Arc<Client>){
+fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
+    //byte,shortstring
     let room_name = read_short_string(stream);
 
     println!("Got room message {}",room_name);
@@ -156,12 +158,12 @@ fn read_join_message(stream: &mut TcpStream, mut client: &Arc<Client>){
             println!("Client {} joined {}",client.id,&room_name);
             *room = Some(rooms[&room_name].clone());
             //send a join message to everyone in the room
-            for (k,v) in clients.iter() {
+            for (_k,v) in clients.iter() {
                 send_client_join_message(v, client.id, &room_name);
             }
 
             //send a join message to the client for everyone else in the room (so they get a join message)
-            for (k,v) in clients.iter() {
+            for (_k,v) in clients.iter() {
                 if v.id != client.id {
                     send_client_join_message(&client, v.id, &room_name);
                 }
@@ -173,22 +175,22 @@ fn read_join_message(stream: &mut TcpStream, mut client: &Arc<Client>){
 
 fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bool){
     //this message is 3u8, sender_id_u32, message_len_u32, message_bytes
-    let mut writeBuf = vec![];
-    writeBuf.push(3u8);
-    writeBuf.extend_from_slice(&sender.id.to_be_bytes());
-    writeBuf.extend_from_slice(&(message.len() as u32).to_be_bytes());
-    writeBuf.extend_from_slice(message);
+    let mut write_buf = vec![];
+    write_buf.push(3u8);
+    write_buf.extend_from_slice(&sender.id.to_be_bytes());
+    write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
+    write_buf.extend_from_slice(message);
     println!("sending {} bytes from {}",message.len(),sender.id);
     {
         let room = sender.room.lock().unwrap();
         if room.is_some() {
 
             let clients = room.as_ref().unwrap().clients.lock().unwrap();
-            for (k,v) in clients.iter(){
+            for (_k,v) in clients.iter(){
                 if !include_sender && v.id == sender.id {
                     continue;
                 }
-                v.sender.send(writeBuf.clone()).unwrap();
+                v.sender.send(write_buf.clone()).unwrap();
             }
         }
     }
@@ -196,6 +198,7 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
 }
 
 fn read_send_message(stream: &mut TcpStream, client: &Arc<Client>, message_type: u8){
+    //4 byte length, array
     //this is a message for everyone in the room (maybe)
     let to_send = read_vec(stream);
     if message_type == 3 {
@@ -208,15 +211,15 @@ fn read_send_message(stream: &mut TcpStream, client: &Arc<Client>, message_type:
 }
 
 fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
-    let mut readBuf:[u8;1] = [0; 1];
+    let mut read_buf:[u8;1] = [0; 1];
     //messages come through as a 4-bit type identifier, that can be one of 0 (login) 1 (get rooms), 2 (join/leave room) 3(send message others) 4(send message all) 5(send message group)
     loop {
 
         //read exactly 1 byte
-        stream.read_exact(&mut readBuf);
+        stream.read_exact(&mut read_buf).unwrap();
 
-        println!("Got a message {}",readBuf[0]);
-        let t = readBuf[0];
+        println!("Got a message {}",read_buf[0]);
+        let t = read_buf[0];
         if t == 0 {
             read_login_message(&mut stream, &mut client);
         } else if t == 1 {
@@ -246,7 +249,7 @@ fn client_write_thread(mut stream: TcpStream, rx: Receiver<Vec<u8>> ) {
 }
 
 
-fn handle_client(mut stream: TcpStream, client_id: u32, clients_mutex: Arc<Mutex<HashMap<u32,Arc<Client>>>>, rooms_mutex: Arc<Mutex<HashMap<String,Arc<Room>>>>){
+fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<Mutex<HashMap<u32,Arc<Client>>>>, rooms_mutex: Arc<Mutex<HashMap<String,Arc<Room>>>>){
     
     stream.set_nodelay(true).unwrap();
     println!("Accepted new connection");
@@ -276,10 +279,10 @@ fn handle_client(mut stream: TcpStream, client_id: u32, clients_mutex: Arc<Mutex
     //handle writing to the thread as needed
     println!("Writing process started");
 
-    let res = read_handle.join();
+    read_handle.join().unwrap();
     client.sender.send(vec![0]).unwrap();
     
-    let res = write_handle.join();
+    write_handle.join().unwrap();
     println!("Client left");
     //now we can kill the client.  
     {
