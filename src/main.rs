@@ -1,6 +1,6 @@
 use std::io::prelude::*;
 use std::thread;
-use std::net::{TcpListener, TcpStream,UdpSocket,IpAddr};
+use std::net::{TcpListener, TcpStream,UdpSocket,IpAddr,SocketAddr};
 use std::collections::HashMap;
 use std::sync::{Arc,Mutex};
 use std::sync::mpsc;
@@ -388,13 +388,75 @@ fn udp_listen(client_mutex: Arc<Mutex<HashMap<u32, Arc<Client>>>>, _room_mutex: 
                     let mut port = client.port.lock().unwrap();
                     *port = addr.port(); //set the udp port to send data to
                     s.send_to(&buf,addr).unwrap(); //echo back
-
                 }
                 
                 
             } else if t == 3 {
-                
+                //message message, send to everyone else in my room
+                {
+                    let clients = client_mutex.lock().unwrap();
+                    let client = clients.get(&client_id).unwrap();
+                    let room_option = client.room.lock().unwrap();
+                    let room = room_option.as_ref().unwrap();
+                    let room_clients = room.clients.lock().unwrap(); //we finally got to the room!
+                    for (_k,v) in room_clients.iter() {
+                        if v.id != client_id{
+                            let ip = v.ip.lock().unwrap();
+                            let port = v.port.lock().unwrap();
+                            match s.send_to(&buf,SocketAddr::new(*ip, *port)) {
+                                Ok(_)=> (),
+                                Err(_) => {println!("Error sending to person in room.  They probably left");}
+                            }
+                        }
+                    }
+                }
 
+            } else if t == 4 {
+                {
+                    let clients = client_mutex.lock().unwrap();
+                    let client = clients.get(&client_id).unwrap();
+                    let room_option = client.room.lock().unwrap();
+                    let room = room_option.as_ref().unwrap();
+                    let room_clients = room.clients.lock().unwrap(); //we finally got to the room!
+                    for (_k,v) in room_clients.iter() {
+                        
+                        let ip = v.ip.lock().unwrap();
+                        let port = v.port.lock().unwrap();
+                        match s.send_to(&buf,SocketAddr::new(*ip, *port)) {
+                            Ok(_)=> (),
+                            Err(_) => {println!("Error sending to person in room.  They probably left");}
+                        }
+                        
+                    }
+                }
+            } else if t == 5 {
+                //send a message to a group
+                //read the group name
+                
+                
+                let group_name_size = buf[5];
+                let message_vec = buf[6..].to_vec();
+                let (group_name_bytes, message_bytes) = message_vec.split_at(group_name_size as usize);
+                let group_name = String::from_utf8(group_name_bytes.to_vec()).unwrap();
+                let clients = client_mutex.lock().unwrap();
+                let client = clients.get(&client_id).unwrap();
+                let groups = client.groups.lock().unwrap();
+                let clients = groups.get(&group_name).unwrap();
+
+                //we need to form a new message without the group name 
+                let mut message_to_send = vec![];
+                message_to_send.push(3u8);
+                message_to_send.extend([buf[1],buf[2],buf[3],buf[4]]);
+                message_to_send.extend(message_bytes);
+                for v in clients.iter() {
+                    
+                    let ip = v.ip.lock().unwrap();
+                    let port = v.port.lock().unwrap();
+                    match s.send_to(&message_bytes,SocketAddr::new(*ip, *port)) {
+                        Ok(_)=> (),
+                        Err(_) => {println!("Error sending to person in room.  They probably left");}
+                    }
+                }
             }
 
             
