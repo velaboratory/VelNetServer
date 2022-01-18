@@ -1,6 +1,6 @@
 use std::io::prelude::*;
 use std::thread;
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream,UdpSocket,IpAddr};
 use std::collections::HashMap;
 use std::sync::{Arc,Mutex};
 use std::sync::mpsc;
@@ -13,7 +13,9 @@ struct Client {
     sender: SyncSender<Vec<u8>>,
     rooms_mutex: Arc<Mutex<HashMap<String,Arc<Room>>>>,
     clients_mutex: Arc<Mutex<HashMap<u32,Arc<Client>>>>,
-    groups: Arc<Mutex<HashMap<String,Vec<Arc<Client>>>>>
+    groups: Arc<Mutex<HashMap<String,Vec<Arc<Client>>>>>,
+    ip: Arc<Mutex<IpAddr>>,
+    port: Arc<Mutex<u16>>
 }
 
 struct Room {
@@ -21,9 +23,7 @@ struct Room {
     clients: Mutex<HashMap<u32,Arc<Client>>>
 }
 
-fn udp_listen(){
-    println!("UDP Thread Started");
-}
+
 
 fn read_u8(stream: &mut TcpStream) -> u8 {
     let mut buf = [0; 1];
@@ -312,7 +312,9 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<Mutex<Has
         sender: tx,
         rooms_mutex: rooms_mutex.clone(),
         clients_mutex: clients_mutex.clone(),
-        groups: Arc::new(Mutex::new(HashMap::new()))
+        groups: Arc::new(Mutex::new(HashMap::new())),
+        ip: Arc::new(Mutex::new(stream.peer_addr().unwrap().ip())),
+        port: Arc::new(Mutex::new(0)) 
     });
 
     {
@@ -351,14 +353,10 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<Mutex<Has
     
 }
 
-fn tcp_listen(){
+fn tcp_listen(client_mutex: Arc<Mutex<HashMap<u32, Arc<Client>>>>, room_mutex: Arc<Mutex<HashMap<String,Arc<Room>>>>){
     println!("Started TCP Listener");
     let listener = TcpListener::bind("127.0.0.1:80").expect("could not bind port");
-    
-    let clients: HashMap<u32, Arc<Client>> = HashMap::new();
-    let rooms: HashMap<String, Arc<Room>> = HashMap::new();
-    let client_mutex = Arc::new(Mutex::new(clients));
-    let room_mutex = Arc::new(Mutex::new(rooms));
+
     let mut next_client_id = 0;
     // accept connections and process them serially
     for stream in listener.incoming() {
@@ -369,13 +367,59 @@ fn tcp_listen(){
     }
 }
 
+fn udp_listen(client_mutex: Arc<Mutex<HashMap<u32, Arc<Client>>>>, _room_mutex: Arc<Mutex<HashMap<String,Arc<Room>>>>){
+    let mut buf = [0u8;1024];
+    let s = UdpSocket::bind("127.0.0.1:80").unwrap();
+    println!("UDP Thread Started");
+    loop {
+        let (packet_size,addr) = s.recv_from(&mut buf).unwrap();
+        println!("Got a UDP packet of size {}",packet_size);
+        let t = buf[0];
+        if packet_size > 5{
+            //get the client id, which has to be sent with every udp message, because you don't know where udp messages are coming from
+            let client_id_bytes = [buf[1],buf[2],buf[3],buf[4]];
+            let client_id = u32::from_be_bytes(client_id_bytes);
+
+            if t == 0 {
+                //connect message, respond back
+                {
+                    let clients = client_mutex.lock().unwrap();
+                    let client = clients.get(&client_id).unwrap();
+                    let mut port = client.port.lock().unwrap();
+                    *port = addr.port(); //set the udp port to send data to
+                    s.send_to(&buf,addr).unwrap(); //echo back
+
+                }
+                
+                
+            } else if t == 3 {
+                
+
+            }
+
+            
+        }
+    
+    }
+    
+
+    
+}
+
 fn main() {
     println!("VelNet Server Starting");
 
+    let clients: HashMap<u32, Arc<Client>> = HashMap::new();
+    let rooms: HashMap<String, Arc<Room>> = HashMap::new();
+    let client_mutex = Arc::new(Mutex::new(clients));
+    let room_mutex = Arc::new(Mutex::new(rooms));
+
     //start the UDP thread
-    let udp_handle = thread::spawn(udp_listen);
+    let udp_clients = Arc::clone(&client_mutex);
+    let udp_rooms = Arc::clone(&room_mutex);
+    let udp_handle = thread::spawn(move ||{udp_listen(udp_clients, udp_rooms);});
     //start the TCP thread
-    tcp_listen();
+    tcp_listen(client_mutex, room_mutex);
     udp_handle.join().unwrap();
     println!("VelNet Ended");
 }
