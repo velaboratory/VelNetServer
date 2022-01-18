@@ -16,6 +16,7 @@ struct Client {
 }
 
 struct Room {
+    name: String,
     clients: Mutex<HashMap<u32,Arc<Client>>>
 }
 
@@ -23,6 +24,11 @@ fn udp_listen(){
     println!("UDP Thread Started");
 }
 
+fn read_u8(string: &mut TcpStream) -> u8 {
+    let mut buf = [0; 1];
+    string.read_exact(&mut buf).unwrap();
+    return buf[0];
+}
 fn read_u32(stream: &mut TcpStream) -> u32 {
     let mut buf:[u8;4] = [0; 4];
     stream.read_exact(&mut buf).unwrap();
@@ -36,11 +42,18 @@ fn read_string(stream: &mut TcpStream) -> String {
     stream.read_exact(&mut stringBytes).unwrap();
     return String::from_utf8(stringBytes).unwrap();
 }
+fn read_short_string(stream: &mut TcpStream) -> String {
+    let size = read_u8(stream);
+    println!("Size in bytes: {}",size);
+    let mut stringBytes = vec![0;size as usize];
+    stream.read_exact(&mut stringBytes).unwrap();
+    return String::from_utf8(stringBytes).unwrap();
+}
 
 fn read_login_message(stream: &mut TcpStream, client: Arc<Client>) {
     println!("Got login message");
-    let username = read_string(stream);
-    let password = read_string(stream);
+    let username = read_short_string(stream);
+    let password = read_short_string(stream);
 
     println!("Got username {} and password {}",username,password);
     
@@ -56,7 +69,7 @@ fn read_rooms_message(stream: &mut TcpStream, client: Arc<Client>){
 }
 
 fn read_join_message(stream: &mut TcpStream, client: Arc<Client>){
-    let room_name = read_string(stream);
+    let room_name = read_short_string(stream);
 
     println!("Got room message {}",room_name);
 
@@ -92,6 +105,8 @@ fn read_join_message(stream: &mut TcpStream, client: Arc<Client>){
                 let mut writeBuf = vec![];
                 writeBuf.push(2u8);
                 writeBuf.extend_from_slice(&(client.id).to_be_bytes()); //send everyone that the client id joined the room
+                writeBuf.push(room_name.as_bytes().len() as u8); 
+                writeBuf.extend_from_slice(room_name.as_bytes());
                 v.sender.send(writeBuf);
             }
 
@@ -101,6 +116,8 @@ fn read_join_message(stream: &mut TcpStream, client: Arc<Client>){
                     let mut writeBuf = vec![];
                     writeBuf.push(2u8);
                     writeBuf.extend_from_slice(&(v.id).to_be_bytes()); //send everyone that the client id joined the room
+                    writeBuf.push(room_name.as_bytes().len() as u8); 
+                    writeBuf.extend_from_slice(room_name.as_bytes());
                     client.sender.send(writeBuf);
                 }
             }
@@ -180,6 +197,28 @@ fn handle_client(mut stream: TcpStream, client_id: u32, clients_mutex: Arc<Mutex
     client.sender.send(vec![0]).unwrap();
     println!("Client left");
     let res = write_handle.join();
+
+    //now we can kill the client.  
+    {
+        //first remove the client from the room they are in
+        if !client.room.is_none(){
+            {
+                let mut clients = client.room.as_ref().unwrap().clients.lock().unwrap();
+                clients.remove(&client.id);
+                //send everyone in the room a message that the client has left
+                for (k,v) in clients.iter() {
+                    let mut writeBuf = vec![];
+                    writeBuf.push(2u8);
+                    writeBuf.extend_from_slice(&(client.id).to_be_bytes()); //send everyone that the client id joined the room
+                    writeBuf.push(client.room.as_ref().unwrap().name.len() as u8);
+                    writeBuf.extend_from_slice(client.room.as_ref().unwrap().name.as_bytes()); //todo
+                    v.sender.send(writeBuf);
+                }
+            }
+        }
+        let mut clients = clients_mutex.lock().unwrap();
+        clients.remove(&client_id);
+    }
     
 }
 
