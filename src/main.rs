@@ -11,7 +11,9 @@ struct Client {
     username: Arc<Mutex<String>>, 
     room: Arc<Mutex<Option<Arc<Room>>>>, 
     sender: SyncSender<Vec<u8>>,
-    rooms_mutex: Arc<Mutex<HashMap<String,Arc<Room>>>>
+    rooms_mutex: Arc<Mutex<HashMap<String,Arc<Room>>>>,
+    clients_mutex: Arc<Mutex<HashMap<u32,Arc<Client>>>>,
+    groups: Arc<Mutex<HashMap<String,Vec<Arc<Client>>>>>
 }
 
 struct Room {
@@ -133,7 +135,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
 
     //if the client is in a room, leave it
 
-    let mut room = client.room.lock().unwrap(); 
+    let room = client.room.lock().unwrap(); 
     if room.as_ref().is_some(){
         client_leave_room(client, true); 
     }
@@ -156,7 +158,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
             let mut clients = rooms[&room_name].clients.lock().unwrap(); 
             clients.insert(client.id,client.clone());
             println!("Client {} joined {}",client.id,&room_name);
-            *room = Some(rooms[&room_name].clone());
+            
             //send a join message to everyone in the room
             for (_k,v) in clients.iter() {
                 send_client_join_message(v, client.id, &room_name);
@@ -194,9 +196,23 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
             }
         }
     }
-    //lock the clients in the room as well, because someone might leave the room in the middle...though, I suppose they'd have to lock the room to do it?
 }
+fn send_group_message(sender: &Arc<Client>, message: &Vec<u8>, group: &String){
 
+    let mut write_buf = vec![];
+    write_buf.push(3u8);
+    write_buf.extend_from_slice(&sender.id.to_be_bytes());
+    write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
+    write_buf.extend_from_slice(message);
+
+    //get the list of client ids for this group
+    let groups = sender.groups.lock().unwrap();
+    let group = groups.get(group).unwrap();
+    for c in group {
+        c.sender.send(write_buf.clone()).unwrap();
+    }
+
+}
 fn read_send_message(stream: &mut TcpStream, client: &Arc<Client>, message_type: u8){
     //4 byte length, array
     //this is a message for everyone in the room (maybe)
@@ -204,15 +220,45 @@ fn read_send_message(stream: &mut TcpStream, client: &Arc<Client>, message_type:
     if message_type == 3 {
        send_room_message(client,&to_send,false);
     }else if message_type == 4 {
-        //everyone in my group
+       send_room_message(client,&to_send,true);
     }else if message_type == 5 {
-        //everyone including me
+        let group = read_short_string(stream);
+       send_group_message(client,&to_send, &group);
     }
+}
+
+fn read_group_message(stream: &mut TcpStream, client: &Arc<Client>){
+    let mut groups = client.groups.lock().unwrap();
+    let group = read_short_string(stream);
+    let id_bytes = read_vec(stream);
+    let num = id_bytes.len();
+    let clients = client.clients_mutex.lock().unwrap();
+    let mut group_clients = vec![];
+    for i in 0..num {
+        let mut slice = [0u8;4];
+        slice[0] = id_bytes[i]; 
+        slice[1] = id_bytes[i+1]; 
+        slice[2] = id_bytes[i+2]; 
+        slice[3] = id_bytes[i+3]; //probably a better way to do this
+        let id = u32::from_be_bytes(slice);
+        
+
+        let client = clients.get(&id).unwrap();
+        group_clients.push(client.clone());
+    }
+
+    //delete the group if it exists
+    if groups.contains_key(&group) {
+        groups.remove(&group); //ensures the client references go away
+    }
+    
+    groups.insert(group.clone(),group_clients); 
+
 }
 
 fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
     let mut read_buf:[u8;1] = [0; 1];
-    //messages come through as a 4-bit type identifier, that can be one of 0 (login) 1 (get rooms), 2 (join/leave room) 3(send message others) 4(send message all) 5(send message group)
+    //messages come through as a 1 byte type identifier, that can be one of 0 (login) 1 (get rooms), 2 (join/leave room) 3 (send message to room), 4 (send message to room including me), 5 (send message to group), 6 (establish group)
     loop {
 
         //read exactly 1 byte
@@ -226,8 +272,10 @@ fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
             read_rooms_message(&mut stream, &mut client);
         } else if t == 2 {
             read_join_message(&mut stream, &mut client); 
-        } else if t == 3 || t == 4 {
+        } else if t == 3 || t == 4 || t==5 {
             read_send_message(&mut stream, &client, t);
+        } else if t == 6 {
+            read_group_message(&mut stream, &client);
         }
             
         
@@ -262,7 +310,9 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<Mutex<Has
         logged_in: Arc::new(Mutex::new(false)),
         room: Arc::new(Mutex::new(Option::None)),
         sender: tx,
-        rooms_mutex: rooms_mutex
+        rooms_mutex: rooms_mutex.clone(),
+        clients_mutex: clients_mutex.clone(),
+        groups: Arc::new(Mutex::new(HashMap::new()))
     });
 
     {
