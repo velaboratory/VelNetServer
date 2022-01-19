@@ -198,7 +198,7 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
     }
 }
 fn send_group_message(sender: &Arc<Client>, message: &Vec<u8>, group: &String){
-
+    println!("Sending group message to {}",group);
     let mut write_buf = vec![];
     write_buf.push(3u8);
     write_buf.extend_from_slice(&sender.id.to_be_bytes());
@@ -222,7 +222,7 @@ fn read_send_message(stream: &mut TcpStream, client: &Arc<Client>, message_type:
     }else if message_type == 4 {
        send_room_message(client,&to_send,true);
     }else if message_type == 5 {
-        let group = read_short_string(stream);
+       let group = read_short_string(stream);
        send_group_message(client,&to_send, &group);
     }
 }
@@ -234,7 +234,12 @@ fn read_group_message(stream: &mut TcpStream, client: &Arc<Client>){
     let num = id_bytes.len();
     let clients = client.clients_mutex.lock().unwrap();
     let mut group_clients = vec![];
-    for i in 0..num {
+    println!("Received form group message {} ", group);
+    let mut i = 0;
+    loop {
+        if i >= num {
+            break;
+        }
         let mut slice = [0u8;4];
         slice[0] = id_bytes[i]; 
         slice[1] = id_bytes[i+1]; 
@@ -243,8 +248,12 @@ fn read_group_message(stream: &mut TcpStream, client: &Arc<Client>){
         let id = u32::from_be_bytes(slice);
         
 
-        let client = clients.get(&id).unwrap();
-        group_clients.push(client.clone());
+        match clients.get(&id) {
+            Some(client) => {group_clients.push(client.clone()); println!("Added {} to group",id);},
+            None => () //not there, so don't add it
+        }
+        
+        i = i + 4;
     }
 
     //delete the group if it exists
@@ -278,7 +287,7 @@ fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
             read_group_message(&mut stream, &client);
         }
             
-        
+        std::io::stdout().flush().unwrap();
     }
 }
 
@@ -375,7 +384,7 @@ fn udp_listen(client_mutex: Arc<Mutex<HashMap<u32, Arc<Client>>>>, _room_mutex: 
         let (packet_size,addr) = s.recv_from(&mut buf).unwrap();
         println!("Got a UDP packet of size {}",packet_size);
         let t = buf[0];
-        if packet_size > 5{
+        if packet_size >= 5{
             //get the client id, which has to be sent with every udp message, because you don't know where udp messages are coming from
             let client_id_bytes = [buf[1],buf[2],buf[3],buf[4]];
             let client_id = u32::from_be_bytes(client_id_bytes);
@@ -418,6 +427,7 @@ fn udp_listen(client_mutex: Arc<Mutex<HashMap<u32, Arc<Client>>>>, _room_mutex: 
                     let room_option = client.room.lock().unwrap();
                     let room = room_option.as_ref().unwrap();
                     let room_clients = room.clients.lock().unwrap(); //we finally got to the room!
+                    buf[0] = 3u8;
                     for (_k,v) in room_clients.iter() {
                         
                         let ip = v.ip.lock().unwrap();
