@@ -20,7 +20,8 @@ struct Client {
 
 struct Room {
     name: String,
-    clients: Mutex<HashMap<u32,Arc<Client>>>
+    clients: Mutex<HashMap<u32,Arc<Client>>>,
+    master_client: Arc<Mutex<Arc<Client>>>
 }
 
 
@@ -38,14 +39,12 @@ fn read_u32(stream: &mut TcpStream) -> u32 {
 }
 fn _read_string(stream: &mut TcpStream) -> String {
     let size = read_u32(stream);
-    println!("Size in bytes: {}",size);
     let mut string_bytes = vec![0;size as usize];
     stream.read_exact(&mut string_bytes).unwrap();
     return String::from_utf8(string_bytes).unwrap();
 }
 fn read_short_string(stream: &mut TcpStream) -> String {
     let size = read_u8(stream);
-    println!("Size in bytes: {}",size);
     let mut string_bytes = vec![0;size as usize];
     stream.read_exact(&mut string_bytes).unwrap();
     return String::from_utf8(string_bytes).unwrap();
@@ -80,6 +79,19 @@ fn read_rooms_message(_stream: &mut TcpStream, mut _client: &Arc<Client>){
 
 }
 
+fn send_client_master_message(to: &Arc<Client>, master_id: u32){
+  //2u8, person_id_u32, room_name_len_u8, room_name_bytes
+  let mut write_buf = vec![];
+  write_buf.push(4u8);
+  write_buf.extend_from_slice(&(master_id).to_be_bytes()); //send everyone that the client id joined the room
+  let res = to.sender.send(write_buf);
+  match res {
+      Ok(_) => println!("send master successful"),
+      Err(_) => println!("send unsuccessful")
+  }
+
+}
+
 fn send_client_join_message(to: &Arc<Client>, from: u32, room: &str){
     
     //2u8, person_id_u32, room_name_len_u8, room_name_bytes
@@ -90,7 +102,7 @@ fn send_client_join_message(to: &Arc<Client>, from: u32, room: &str){
     write_buf.extend_from_slice(room.as_bytes());
     let res = to.sender.send(write_buf);
     match res {
-        Ok(_) => println!("send successful"),
+        Ok(_) => println!("send join successful"),
         Err(_) => println!("send unsuccessful")
     }
 }
@@ -103,8 +115,31 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
     if room.is_some(){
         {
             let room = room.as_ref().unwrap();
+
+            //may have to choose a new master
+            let mut master_client = room.master_client.lock().unwrap();
+            let mut change_master = false;
+            let mut clients = room.clients.lock().unwrap();
+
+            let mut new_master_id = 0;
+
+            if master_client.id == client.id {
+                println!("Will change master");
+                //change the master
+                change_master = true;
+                for (k,v) in clients.iter() {
+                    if v.id != client.id {
+                        new_master_id = v.id;
+                        break;
+                    }
+                }
+            }
+
+
+
             println!("Client leaving current room {}",&room.name);
-            let mut clients = room.clients.lock().unwrap();           
+                       
+            
             for (_k,v) in clients.iter() {
                 if !send_to_client && v.id == client.id{
                     continue;
@@ -119,6 +154,17 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
                 let mut rooms = client.rooms_mutex.lock().unwrap(); 
                 rooms.remove(&room.name);
                 println!("Destroyed room {}",&room.name)
+            }else if change_master{
+                println!("Changing master to {}",new_master_id);
+                println!("Here {}",clients.len());
+                for (_k,v) in clients.iter() {
+                    println!("Changing master to {}",new_master_id);
+                    send_client_master_message(&v, new_master_id);
+                }
+
+                
+                *master_client = clients.get(&new_master_id).unwrap().clone();
+                
             }
         }
     }
@@ -147,7 +193,8 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
             let map: HashMap<u32, Arc<Client>> = HashMap::new();
             let r = Arc::new(Room {
                 name: room_name.to_string(),
-                clients: Mutex::new(map)
+                clients: Mutex::new(map),
+                master_client: Arc::new(Mutex::new(client.clone())) //client is the master, since they joined first
             });
             rooms.insert(String::from(&room_name),r);
             println!("New room {} created",&room_name);
@@ -170,6 +217,9 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
                     send_client_join_message(&client, v.id, &room_name);
                 }
             }
+            //tell the client who the master is
+            let master_client = room.as_ref().unwrap().master_client.lock().unwrap();
+            send_client_master_message(client, master_client.id);
         }
     }
     
@@ -182,7 +232,7 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
     write_buf.extend_from_slice(&sender.id.to_be_bytes());
     write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
     write_buf.extend_from_slice(message);
-    println!("sending {} bytes from {}",message.len(),sender.id);
+    //println!("sending {} bytes from {}",message.len(),sender.id);
     {
         let room = sender.room.lock().unwrap();
         if room.is_some() {
@@ -198,7 +248,6 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
     }
 }
 fn send_group_message(sender: &Arc<Client>, message: &Vec<u8>, group: &String){
-    println!("Sending group message to {}",group);
     let mut write_buf = vec![];
     write_buf.push(3u8);
     write_buf.extend_from_slice(&sender.id.to_be_bytes());
@@ -207,9 +256,16 @@ fn send_group_message(sender: &Arc<Client>, message: &Vec<u8>, group: &String){
 
     //get the list of client ids for this group
     let groups = sender.groups.lock().unwrap();
-    let group = groups.get(group).unwrap();
-    for c in group {
-        c.sender.send(write_buf.clone()).unwrap();
+    if groups.contains_key(group) {
+      let group = groups.get(group).unwrap();
+      for c in group {
+          //there may be a leftover when a client leaves...will fix itself
+
+          match c.sender.send(write_buf.clone()) {
+              Ok(_) => (),
+              Err(_) => println!("no client in group")
+          }
+      }
     }
 
 }
@@ -273,7 +329,7 @@ fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
         //read exactly 1 byte
         stream.read_exact(&mut read_buf).unwrap();
 
-        println!("Got a message {}",read_buf[0]);
+        //println!("Got a message {}",read_buf[0]);
         let t = read_buf[0];
         if t == 0 {
             read_login_message(&mut stream, &mut client);
@@ -296,7 +352,7 @@ fn client_write_thread(mut stream: TcpStream, rx: Receiver<Vec<u8>> ) {
     //wait on messages in my queue
     loop {
         let m = rx.recv().unwrap();
-        println!("Sending a message {}",m.len());
+        //println!("Sending a message {}",m.len());
         if m.len() == 1{
             break;
         }
