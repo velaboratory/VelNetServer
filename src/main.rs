@@ -114,6 +114,7 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
     
     if room.is_some(){
         {
+            println!("Client in room, leaving");
             let room = room.as_ref().unwrap();
 
             //may have to choose a new master
@@ -167,7 +168,10 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
                 
             }
         }
+    } else{
+        println!("Client not in room");
     }
+    
     *room = Option::None;
     
 
@@ -175,16 +179,31 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
 
 fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
     //byte,shortstring
-    let room_name = read_short_string(stream);
-
+    let mut room_name = read_short_string(stream);
+    room_name = room_name.trim().to_string();
     println!("Got room message {}",room_name);
 
+   
     //if the client is in a room, leave it
-
-    let mut room = client.room.write().unwrap(); 
-    if room.as_ref().is_some(){
+    let mut leave_room = false;
+    {
+        let mut room = client.room.read().unwrap();  //must release this mutex before calling into a function that uses it
+        if room.as_ref().is_some(){
+            println!("Leaving the current room ");
+            leave_room = true;
+        }
+    }
+    if leave_room {
         client_leave_room(client, true); 
     }
+
+    if room_name.trim() == "" || room_name == "-1" {
+        println!("Empty room, leaving");
+        return;
+    }
+    
+    
+    
     
     //join room_name
     {
@@ -205,7 +224,11 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
             let mut clients = rooms[&room_name].clients.write().unwrap(); 
             clients.insert(client.id,client.clone());
             println!("Client {} joined {}",client.id,&room_name);
-            *room = Some(rooms.get(&room_name).unwrap().clone()); //we create an option and assign it back to the room
+            {
+                let mut room = client.room.write().unwrap(); 
+                *room = Some(rooms.get(&room_name).unwrap().clone()); //we create an option and assign it back to the room
+            }
+            
             //send a join message to everyone in the room
             for (_k,v) in clients.iter() {
                 send_client_join_message(v, client.id, &room_name);
@@ -217,6 +240,8 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
                     send_client_join_message(&client, v.id, &room_name);
                 }
             }
+
+            let room = client.room.read().unwrap(); 
             //tell the client who the master is
             let master_client = room.as_ref().unwrap().master_client.read().unwrap();
             send_client_master_message(client, master_client.id);
@@ -242,7 +267,11 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
                 if !include_sender && v.id == sender.id {
                     continue;
                 }
-                v.sender.send(write_buf.clone()).unwrap();
+                match v.sender.send(write_buf.clone()){
+                    Ok(_) => (),
+                    Err(x) => println!("Error sending to client {}: {}",v.id,x)
+                } //this sometimes fails. 
+
             }
         }
     }
