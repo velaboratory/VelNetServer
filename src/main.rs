@@ -360,15 +360,15 @@ fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
 
         //println!("Got a message {}",read_buf[0]);
         let t = read_buf[0];
-        if t == 0 {
+        if t == 0 { //[0:u8][username.length():u8][username:shortstring][password.length():u8][password:shortstring]
             read_login_message(&mut stream, &mut client);
-        } else if t == 1 {
+        } else if t == 1 {//[1:u8]
             read_rooms_message(&mut stream, &mut client);
-        } else if t == 2 {
+        } else if t == 2 {//[2:u8][roomname.length():u8][roomname:shortstring]
             read_join_message(&mut stream, &mut client); 
-        } else if t == 3 || t == 4 || t==5 {
+        } else if t == 3 || t == 4 || t==5 { //others,all,group[t:u8][message.length():i32][message:u8array]
             read_send_message(&mut stream, &client, t);
-        } else if t == 6 {
+        } else if t == 6 { //[t:u8][list.lengthbytes:i32][clients:i32array]
             read_group_message(&mut stream, &client);
         }
             
@@ -474,7 +474,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
             let client_id_bytes = [buf[1],buf[2],buf[3],buf[4]];
             let client_id = u32::from_be_bytes(client_id_bytes);
 
-            if t == 0 {
+            if t == 0 { //1 byte, 0.  Nothing else.  This is just to establish the udp port, Echos back the same thing sent
                 //connect message, respond back
                 {
                     let clients = client_mutex.read().unwrap();
@@ -485,8 +485,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                 }
                 
                 
-            } else if t == 3 {
-                //message message, send to everyone else in my room
+            } else if t == 3 { //[3:u8][from:i32][contents:u8array] note that it must fit into the packet of 1024 bytes
                 {
                     let clients = client_mutex.read().unwrap();
                     let client = clients.get(&client_id).unwrap();
@@ -505,14 +504,14 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                     }
                 }
 
-            } else if t == 4 {
+            } else if t == 4 { //see above
                 {
                     let clients = client_mutex.read().unwrap();
                     let client = clients.get(&client_id).unwrap();
                     let room_option = client.room.read().unwrap();
                     let room = room_option.as_ref().unwrap();
                     let room_clients = room.clients.read().unwrap(); //we finally got to the room!
-                    buf[0] = 3u8;
+                    buf[0] = 3u8; //messages are always 3s, even though this came in as 4 
                     for (_k,v) in room_clients.iter() {
                         
                         let ip = v.ip.read().unwrap();
@@ -524,10 +523,10 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                         
                     }
                 }
-            } else if t == 5 {
+            } else if t == 5 { //[5:byte][from:i32][group.length():u8][message:u8array]
+                //this one is a little different, because we don't send the group in the message, so we have to formulate another message (like a 3 message)
                 //send a message to a group
                 //read the group name
-                
                 
                 let group_name_size = buf[5];
                 let message_vec = buf[6..].to_vec();
