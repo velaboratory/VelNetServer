@@ -549,26 +549,34 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                 //read the group name
                 
                 let group_name_size = buf[5];
-                let message_vec = buf[6..].to_vec();
+                let message_vec = buf[6..packet_size].to_vec();
                 let (group_name_bytes, message_bytes) = message_vec.split_at(group_name_size as usize);
                 let group_name = String::from_utf8(group_name_bytes.to_vec()).unwrap();
                 let clients = client_mutex.read().unwrap();
                 let client = clients.get(&client_id).unwrap();
                 let groups = client.groups.read().unwrap();
-                let clients = groups.get(&group_name).unwrap();
-
-                //we need to form a new message without the group name 
-                let mut message_to_send = vec![];
-                message_to_send.push(3u8);
-                message_to_send.extend([buf[1],buf[2],buf[3],buf[4]]);
-                message_to_send.extend(message_bytes);
-                for v in clients.iter() {
+                if groups.contains_key(&group_name) {
                     
-                    let ip = v.ip.read().unwrap();
-                    let port = v.port.read().unwrap();
-                    match s.send_to(&message_bytes,SocketAddr::new(*ip, *port)) {
-                        Ok(_)=> (),
-                        Err(_) => {println!("Error sending to person in room.  They probably left");}
+                
+                    let clients = groups.get(&group_name).unwrap();
+                    
+                    
+
+                    //we need to form a new message without the group name 
+                    let mut message_to_send = vec![];
+                    message_to_send.push(3u8);
+                    message_to_send.extend([buf[1],buf[2],buf[3],buf[4]]);
+                    message_to_send.extend(message_bytes);
+                    
+                    for v in clients.iter() {
+                        
+                        let ip = v.ip.read().unwrap();
+                        let port = v.port.read().unwrap();
+                        
+                        match s.send_to(&message_to_send,SocketAddr::new(*ip, *port)) {
+                            Ok(_)=> (),
+                            Err(_) => {println!("Error sending to person in room.  They probably left");}
+                        }
                     }
                 }
             }
