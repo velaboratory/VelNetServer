@@ -75,8 +75,28 @@ fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
     client.sender.send(write_buf).unwrap();
 }
 
-fn read_rooms_message(_stream: &mut TcpStream, mut _client: &Arc<Client>){
+fn read_rooms_message(_stream: &mut TcpStream, mut client: &Arc<Client>){
+    println!("Got rooms message");
 
+    let mut write_buf = vec![];
+    write_buf.push(1u8);
+    //first we need to get the room names
+
+    let rooms = client.rooms_mutex.read().unwrap();
+    let mut rooms_vec = vec![];
+    for (k,v) in rooms.iter() {
+        let clients = v.clients.read().unwrap();
+        let room_string = format!("{}:{}",k,clients.len());
+        rooms_vec.push(room_string);
+    }
+    
+    let rooms_message = rooms_vec.join(",");
+    let message_bytes = rooms_message.as_bytes();
+    let message_len = message_bytes.len() as u32;
+    write_buf.extend_from_slice(&(message_len).to_be_bytes());
+    write_buf.extend_from_slice(message_bytes);
+    client.sender.send(write_buf).unwrap();
+    
 }
 
 fn send_client_master_message(to: &Arc<Client>, master_id: u32){
