@@ -75,7 +75,7 @@ fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
     client.sender.send(write_buf).unwrap();
 }
 
-fn read_rooms_message(_stream: &mut TcpStream, mut client: &Arc<Client>){
+fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
     println!("Got rooms message");
 
     let mut write_buf = vec![];
@@ -177,7 +177,6 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
                 println!("Destroyed room {}",&room.name)
             }else if change_master{
                 println!("Changing master to {}",new_master_id);
-                println!("Here {}",clients.len());
                 for (_k,v) in clients.iter() {
                     println!("Changing master to {}",new_master_id);
                     send_client_master_message(&v, new_master_id);
@@ -207,7 +206,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
     //if the client is in a room, leave it
     let mut leave_room = false;
     {
-        let mut room = client.room.read().unwrap();  //must release this mutex before calling into a function that uses it
+        let room = client.room.read().unwrap();  //must release this mutex before calling into a function that uses it
         if room.as_ref().is_some(){
             println!("Leaving the current room ");
             leave_room = true;
@@ -487,7 +486,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
     println!("UDP Thread Started");
     loop {
         let (packet_size,addr) = s.recv_from(&mut buf).unwrap();
-        println!("Got a UDP packet of size {}",packet_size);
+        
         let t = buf[0];
         if packet_size >= 5{
             //get the client id, which has to be sent with every udp message, because you don't know where udp messages are coming from
