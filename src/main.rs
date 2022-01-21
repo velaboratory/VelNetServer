@@ -59,7 +59,6 @@ fn read_vec(stream: &mut TcpStream) -> Vec<u8> {
 
 fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
     //byte,shortstring,byte,shortstring
-    println!("Got login message");
     let username = read_short_string(stream);
     let password = read_short_string(stream);
 
@@ -106,8 +105,8 @@ fn send_client_master_message(to: &Arc<Client>, master_id: u32){
   write_buf.extend_from_slice(&(master_id).to_be_bytes()); //send everyone that the client id joined the room
   let res = to.sender.send(write_buf);
   match res {
-      Ok(_) => println!("send master successful"),
-      Err(_) => println!("send unsuccessful")
+      Ok(_) => (),
+      Err(_) => ()
   }
 
 }
@@ -122,8 +121,8 @@ fn send_client_join_message(to: &Arc<Client>, from: u32, room: &str){
     write_buf.extend_from_slice(room.as_bytes());
     let res = to.sender.send(write_buf);
     match res {
-        Ok(_) => println!("send join successful"),
-        Err(_) => println!("send unsuccessful")
+        Ok(_) => (),
+        Err(_) => ()
     }
 }
 
@@ -178,7 +177,6 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
             }else if change_master{
                 println!("Changing master to {}",new_master_id);
                 for (_k,v) in clients.iter() {
-                    println!("Changing master to {}",new_master_id);
                     send_client_master_message(&v, new_master_id);
                 }
 
@@ -338,7 +336,6 @@ fn read_group_message(stream: &mut TcpStream, client: &Arc<Client>){
     let num = id_bytes.len();
     let clients = client.clients_mutex.read().unwrap();
     let mut group_clients = vec![];
-    println!("Received form group message {} ", group);
     let mut i = 0;
     loop {
         if i >= num {
@@ -353,7 +350,7 @@ fn read_group_message(stream: &mut TcpStream, client: &Arc<Client>){
         
 
         match clients.get(&id) {
-            Some(client) => {group_clients.push(client.clone()); println!("Added {} to group",id);},
+            Some(client) => {group_clients.push(client.clone());},
             None => () //not there, so don't add it
         }
         
@@ -442,20 +439,22 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<Ha
     let write_handle = thread::spawn(move ||{client_write_thread(stream, rx)});
 
     //handle writing to the thread as needed
-    println!("Writing process started");
 
     match read_handle.join(){
         Ok(_)=>(),
         Err(_)=>()
     }
     
-    client.sender.send(vec![0]).unwrap();
+    match client.sender.send(vec![0]){
+        Ok(_)=>(),
+        Err(_)=>()
+    }
     
     match write_handle.join() {
         Ok(_)=>(),
         Err(_)=>()
     }
-    println!("Client left");
+    println!("Client {} left",client_id);
     //now we can kill the client.  
     {
         //make sure we remove the client from all rooms
@@ -517,7 +516,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                             let port = v.port.read().unwrap();
                             match s.send_to(&buf,SocketAddr::new(*ip, *port)) {
                                 Ok(_)=> (),
-                                Err(_) => {println!("Error sending to person in room.  They probably left");}
+                                Err(_) => ()
                             }
                         }
                     }
@@ -537,7 +536,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                         let port = v.port.read().unwrap();
                         match s.send_to(&buf,SocketAddr::new(*ip, *port)) {
                             Ok(_)=> (),
-                            Err(_) => {println!("Error sending to person in room.  They probably left");}
+                            Err(_) => ()
                         }
                         
                     }
@@ -574,7 +573,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                         
                         match s.send_to(&message_to_send,SocketAddr::new(*ip, *port)) {
                             Ok(_)=> (),
-                            Err(_) => {println!("Error sending to person in room.  They probably left");}
+                            Err(_) => ()
                         }
                     }
                 }
