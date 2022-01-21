@@ -503,7 +503,7 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<Ha
 
 fn tcp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, room_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>){
     println!("Started TCP Listener");
-    let listener = TcpListener::bind("127.0.0.1:80").expect("could not bind port");
+    let listener = TcpListener::bind("0.0.0.0:80").expect("could not bind port");
 
     let mut next_client_id = 0;
     // accept connections and process them serially
@@ -517,7 +517,7 @@ fn tcp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, room_mutex: 
 
 fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>){
     let mut buf = [0u8;1024];
-    let s = UdpSocket::bind("127.0.0.1:80").unwrap();
+    let s = UdpSocket::bind("0.0.0.0:80").unwrap();
     println!("UDP Thread Started");
     loop {
         let (packet_size,addr) = s.recv_from(&mut buf).unwrap();
