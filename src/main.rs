@@ -57,6 +57,7 @@ fn read_vec(stream: &mut TcpStream) -> Vec<u8> {
     return message;
 }
 
+//this is in response to someone asking to login (this is where usernames and passwords would be processed, in theory)
 fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
     //byte,shortstring,byte,shortstring
     let username = read_short_string(stream);
@@ -74,6 +75,7 @@ fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
     client.sender.send(write_buf).unwrap();
 }
 
+//this is in response to a request for rooms.
 fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
     println!("Got rooms message");
 
@@ -97,6 +99,7 @@ fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
     client.sender.send(write_buf).unwrap();
     
 }
+
 
 fn send_client_master_message(to: &Arc<Client>, master_id: u32){
   //2u8, person_id_u32, room_name_len_u8, room_name_bytes
@@ -126,6 +129,7 @@ fn send_client_join_message(to: &Arc<Client>, from: u32, room: &str){
     }
 }
 
+//helper function, because clients leave room in multiple places
 fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
     //first remove the client from the room they are in
     
@@ -267,7 +271,14 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
     
 }
 
-fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bool){
+// function send_message_to_clients_dictionary(clients: message: &Vec<u8>, include_sender: bool){
+    
+        
+       
+        
+// }
+
+fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bool, ordered: bool){
     //this message is 3u8, sender_id_u32, message_len_u32, message_bytes
     let mut write_buf = vec![];
     write_buf.push(3u8);
@@ -276,19 +287,40 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
     write_buf.extend_from_slice(message);
     //println!("sending {} bytes from {}",message.len(),sender.id);
     {
-        let room = sender.room.read().unwrap();
-        if room.is_some() {
+        
+        if !ordered {
+            let room = sender.room.read().unwrap(); 
+            
+            if room.is_some() {
 
-            let clients = room.as_ref().unwrap().clients.read().unwrap();
-            for (_k,v) in clients.iter(){
-                if !include_sender && v.id == sender.id {
-                    continue;
+                let clients = room.as_ref().unwrap().clients.read().unwrap();
+                for (_k,v) in clients.iter(){
+                    if !include_sender && v.id == sender.id {
+                        continue;
+                    }
+                    match v.sender.send(write_buf.clone()){
+                        Ok(_) => (),
+                        Err(x) => println!("Error sending to client {}: {}",v.id,x)
+                    } //this sometimes fails. 
+
                 }
-                match v.sender.send(write_buf.clone()){
-                    Ok(_) => (),
-                    Err(x) => println!("Error sending to client {}: {}",v.id,x)
-                } //this sometimes fails. 
+            }
+        }else{ //I'm bad at rust, so I don't know how else to do this other than repeat the code above because the types are so different
+            let room = sender.room.write().unwrap(); 
+            
+            if room.is_some() {
 
+                let clients = room.as_ref().unwrap().clients.read().unwrap();
+                for (_k,v) in clients.iter(){
+                    if !include_sender && v.id == sender.id {
+                        continue;
+                    }
+                    match v.sender.send(write_buf.clone()){
+                        Ok(_) => (),
+                        Err(x) => println!("Error sending to client {}: {}",v.id,x)
+                    } //this sometimes fails. 
+
+                }
             }
         }
     }
@@ -320,10 +352,14 @@ fn read_send_message(stream: &mut TcpStream, client: &Arc<Client>, message_type:
     //this is a message for everyone in the room (maybe)
     let to_send = read_vec(stream);
     if message_type == 3 {
-       send_room_message(client,&to_send,false);
+       send_room_message(client,&to_send,false,false);
     }else if message_type == 4 {
-       send_room_message(client,&to_send,true);
-    }else if message_type == 5 {
+       send_room_message(client,&to_send,true,false);
+    } else if message_type == 7 { //ordered
+        send_room_message(client,&to_send,false,true);
+     }else if message_type == 8 { //ordered
+        send_room_message(client,&to_send,true,true);
+     }else if message_type == 5 {
        let group = read_short_string(stream);
        send_group_message(client,&to_send, &group);
     }
@@ -382,7 +418,7 @@ fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
             read_rooms_message(&mut stream, &mut client);
         } else if t == 2 {//[2:u8][roomname.length():u8][roomname:shortstring]
             read_join_message(&mut stream, &mut client); 
-        } else if t == 3 || t == 4 || t==5 { //others,all,group[t:u8][message.length():i32][message:u8array]
+        } else if t == 3 || t == 4 || t==5 || t==7 || t==8 { //others,all,group[t:u8][message.length():i32][message:u8array]
             read_send_message(&mut stream, &client, t);
         } else if t == 6 { //[t:u8][list.lengthbytes:i32][clients:i32array]
             read_group_message(&mut stream, &client);
