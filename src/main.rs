@@ -528,31 +528,40 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
             let client_id_bytes = [buf[1],buf[2],buf[3],buf[4]];
             let client_id = u32::from_be_bytes(client_id_bytes);
 
+            
+
             if t == 0 { //1 byte, 0.  Nothing else.  This is just to establish the udp port, Echos back the same thing sent
                 //connect message, respond back
                 {
                     let clients = client_mutex.read().unwrap();
-                    let client = clients.get(&client_id).unwrap();
-                    let mut port = client.port.write().unwrap();
-                    *port = addr.port(); //set the udp port to send data to
-                    s.send_to(&buf,addr).unwrap(); //echo back
+                    if clients.contains_key(&client_id){
+                        let client = clients.get(&client_id).unwrap();
+                        let mut port = client.port.write().unwrap();
+                        *port = addr.port(); //set the udp port to send data to
+                        match s.send_to(&buf,addr) {
+                            Ok(_)=>(),
+                            Err(_)=>()
+                        }
+                    }
                 }
                 
                 
             } else if t == 3 { //[3:u8][from:i32][contents:u8array] note that it must fit into the packet of 1024 bytes
                 {
                     let clients = client_mutex.read().unwrap();
-                    let client = clients.get(&client_id).unwrap();
-                    let room_option = client.room.read().unwrap();
-                    let room = room_option.as_ref().unwrap();
-                    let room_clients = room.clients.read().unwrap(); //we finally got to the room!
-                    for (_k,v) in room_clients.iter() {
-                        if v.id != client_id{
-                            let ip = v.ip.read().unwrap();
-                            let port = v.port.read().unwrap();
-                            match s.send_to(&buf,SocketAddr::new(*ip, *port)) {
-                                Ok(_)=> (),
-                                Err(_) => ()
+                    if clients.contains_key(&client_id){
+                        let client = clients.get(&client_id).unwrap();
+                        let room_option = client.room.read().unwrap();
+                        let room = room_option.as_ref().unwrap();
+                        let room_clients = room.clients.read().unwrap(); //we finally got to the room!
+                        for (_k,v) in room_clients.iter() {
+                            if v.id != client_id{
+                                let ip = v.ip.read().unwrap();
+                                let port = v.port.read().unwrap();
+                                match s.send_to(&buf,SocketAddr::new(*ip, *port)) {
+                                    Ok(_)=> (),
+                                    Err(_) => ()
+                                }
                             }
                         }
                     }
@@ -561,20 +570,22 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
             } else if t == 4 { //see above
                 {
                     let clients = client_mutex.read().unwrap();
-                    let client = clients.get(&client_id).unwrap();
-                    let room_option = client.room.read().unwrap();
-                    let room = room_option.as_ref().unwrap();
-                    let room_clients = room.clients.read().unwrap(); //we finally got to the room!
-                    buf[0] = 3u8; //messages are always 3s, even though this came in as 4 
-                    for (_k,v) in room_clients.iter() {
-                        
-                        let ip = v.ip.read().unwrap();
-                        let port = v.port.read().unwrap();
-                        match s.send_to(&buf,SocketAddr::new(*ip, *port)) {
-                            Ok(_)=> (),
-                            Err(_) => ()
+                    if clients.contains_key(&client_id){
+                        let client = clients.get(&client_id).unwrap();
+                        let room_option = client.room.read().unwrap();
+                        let room = room_option.as_ref().unwrap();
+                        let room_clients = room.clients.read().unwrap(); //we finally got to the room!
+                        buf[0] = 3u8; //messages are always 3s, even though this came in as 4 
+                        for (_k,v) in room_clients.iter() {
+                            
+                            let ip = v.ip.read().unwrap();
+                            let port = v.port.read().unwrap();
+                            match s.send_to(&buf,SocketAddr::new(*ip, *port)) {
+                                Ok(_)=> (),
+                                Err(_) => ()
+                            }
+                            
                         }
-                        
                     }
                 }
             } else if t == 5 { //[5:byte][from:i32][group.length():u8][message:u8array]
@@ -587,29 +598,31 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                 let (group_name_bytes, message_bytes) = message_vec.split_at(group_name_size as usize);
                 let group_name = String::from_utf8(group_name_bytes.to_vec()).unwrap();
                 let clients = client_mutex.read().unwrap();
-                let client = clients.get(&client_id).unwrap();
-                let groups = client.groups.read().unwrap();
-                if groups.contains_key(&group_name) {
+                if clients.contains_key(&client_id){
+                    let client = clients.get(&client_id).unwrap();
+                    let groups = client.groups.read().unwrap();
+                    if groups.contains_key(&group_name) {
+                        
                     
-                
-                    let clients = groups.get(&group_name).unwrap();
-                    
-                    
+                        let clients = groups.get(&group_name).unwrap();
+                        
+                        
 
-                    //we need to form a new message without the group name 
-                    let mut message_to_send = vec![];
-                    message_to_send.push(3u8);
-                    message_to_send.extend([buf[1],buf[2],buf[3],buf[4]]);
-                    message_to_send.extend(message_bytes);
-                    
-                    for v in clients.iter() {
+                        //we need to form a new message without the group name 
+                        let mut message_to_send = vec![];
+                        message_to_send.push(3u8);
+                        message_to_send.extend([buf[1],buf[2],buf[3],buf[4]]);
+                        message_to_send.extend(message_bytes);
                         
-                        let ip = v.ip.read().unwrap();
-                        let port = v.port.read().unwrap();
-                        
-                        match s.send_to(&message_to_send,SocketAddr::new(*ip, *port)) {
-                            Ok(_)=> (),
-                            Err(_) => ()
+                        for v in clients.iter() {
+                            
+                            let ip = v.ip.read().unwrap();
+                            let port = v.port.read().unwrap();
+                            
+                            match s.send_to(&message_to_send,SocketAddr::new(*ip, *port)) {
+                                Ok(_)=> (),
+                                Err(_) => ()
+                            }
                         }
                     }
                 }
