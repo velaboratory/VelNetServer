@@ -5,6 +5,17 @@ use std::collections::HashMap;
 use std::sync::{Arc,RwLock};
 use std::sync::mpsc;
 use std::sync::mpsc::{SyncSender,Receiver};
+
+enum SendMessageType {
+    LoggedIn = 0, 
+    RoomList = 1,
+    PlayerJoined = 2,
+    DataMessage = 3,
+    MasterMessage = 4,
+    YouJoined = 5,
+    PlayerLeft = 6,
+    YouLeft = 7
+}
 struct Client {
     logged_in: Arc<RwLock<bool>>,
     id: u32,
@@ -69,7 +80,7 @@ fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
     let mut client_loggedin = client.logged_in.write().unwrap();
     *client_loggedin = true;
     let mut write_buf = vec![];
-    write_buf.push(0u8);
+    write_buf.push(SendMessageType::LoggedIn as u8);
     write_buf.extend_from_slice(&(client.id).to_be_bytes()); //send the client the id
 
     client.sender.send(write_buf).unwrap();
@@ -80,7 +91,7 @@ fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
     println!("Got rooms message");
 
     let mut write_buf = vec![];
-    write_buf.push(1u8);
+    write_buf.push(SendMessageType::RoomList as u8);
     //first we need to get the room names
 
     let rooms = client.rooms_mutex.read().unwrap();
@@ -104,7 +115,7 @@ fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
 fn send_client_master_message(to: &Arc<Client>, master_id: u32){
   //2u8, person_id_u32, room_name_len_u8, room_name_bytes
   let mut write_buf = vec![];
-  write_buf.push(4u8);
+  write_buf.push(SendMessageType::MasterMessage as u8);
   write_buf.extend_from_slice(&(master_id).to_be_bytes()); //send everyone that the client id joined the room
   let res = to.sender.send(write_buf);
   match res {
@@ -115,10 +126,9 @@ fn send_client_master_message(to: &Arc<Client>, master_id: u32){
 }
 
 fn send_client_join_message(to: &Arc<Client>, from: u32, room: &str){
-    
     //2u8, person_id_u32, room_name_len_u8, room_name_bytes
     let mut write_buf = vec![];
-    write_buf.push(2u8);
+    write_buf.push(SendMessageType::PlayerJoined as u8);
     write_buf.extend_from_slice(&(from).to_be_bytes()); //send everyone that the client id joined the room
     write_buf.push(room.as_bytes().len() as u8); 
     write_buf.extend_from_slice(room.as_bytes());
@@ -128,6 +138,48 @@ fn send_client_join_message(to: &Arc<Client>, from: u32, room: &str){
         Err(_) => ()
     }
 }
+
+fn send_you_joined_message(to: &Arc<Client>, in_room: Vec<u32>, room: &str){
+    //you_joined_u8, ids_len_u32, id_list_array_u32, room_name_len_u8, room_name_bytes
+    let mut write_buf = vec![];
+    write_buf.push(SendMessageType::YouJoined as u8);
+    write_buf.extend_from_slice(&(in_room.len() as u32).to_be_bytes());  
+    for id in in_room {
+        write_buf.extend_from_slice(&(id).to_be_bytes());
+    }
+    write_buf.push(room.as_bytes().len() as u8); 
+    write_buf.extend_from_slice(room.as_bytes());
+    let res = to.sender.send(write_buf);
+    match res {
+        Ok(_) => (),
+        Err(_) => ()
+    }
+}
+
+fn send_you_left_message(to: &Arc<Client>, room: &str){
+    let mut write_buf = vec![];
+    write_buf.push(SendMessageType::YouLeft as u8);
+    write_buf.push(room.as_bytes().len() as u8); 
+    write_buf.extend_from_slice(room.as_bytes());
+    let res = to.sender.send(write_buf);
+    match res {
+        Ok(_) => (),
+        Err(_) => ()
+    }
+}
+fn send_client_left_message(to: &Arc<Client>, from: u32, room: &str){
+    let mut write_buf = vec![];
+    write_buf.push(SendMessageType::PlayerLeft as u8);
+    write_buf.extend_from_slice(&(from).to_be_bytes()); //send everyone that the client id left the room
+    write_buf.push(room.as_bytes().len() as u8); 
+    write_buf.extend_from_slice(room.as_bytes());
+    let res = to.sender.send(write_buf);
+    match res {
+        Ok(_) => (),
+        Err(_) => ()
+    }
+}
+
 
 //helper function, because clients leave room in multiple places
 fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
@@ -167,8 +219,11 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
             for (_k,v) in clients.iter() {
                 if !send_to_client && v.id == client.id{
                     continue;
+                }else if v.id == client.id {
+                    send_you_left_message(v, &room.name);
+                }else{
+                    send_client_left_message(v, client.id, &room.name); 
                 }
-                send_client_join_message(v, client.id, "") //send the leave room message to everyone in the room
             }
             clients.remove(&client.id); //remove the client from that list in the room
 
@@ -250,17 +305,22 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
                 *room = Some(rooms.get(&room_name).unwrap().clone()); //we create an option and assign it back to the room
             }
             
-            //send a join message to everyone in the room
-            for (_k,v) in clients.iter() {
-                send_client_join_message(v, client.id, &room_name);
-            }
-
-            //send a join message to the client for everyone else in the room (so they get a join message)
+            //send a join message to everyone in the room (except the client)
             for (_k,v) in clients.iter() {
                 if v.id != client.id {
-                    send_client_join_message(&client, v.id, &room_name);
+                    send_client_join_message(v, client.id, &room_name);
                 }
             }
+
+            //send a join message to the client that has all of the ids in the room
+            let mut ids_in_room = vec![];  
+            for (_k,v) in clients.iter() {
+                ids_in_room.push(v.id);
+                
+            }
+            
+            send_you_joined_message(client, ids_in_room, &room_name);
+
 
             let room = client.room.read().unwrap(); 
             //tell the client who the master is
@@ -281,7 +341,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
 fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bool, ordered: bool){
     //this message is 3u8, sender_id_u32, message_len_u32, message_bytes
     let mut write_buf = vec![];
-    write_buf.push(3u8);
+    write_buf.push(SendMessageType::DataMessage as u8);
     write_buf.extend_from_slice(&sender.id.to_be_bytes());
     write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
     write_buf.extend_from_slice(message);
@@ -327,7 +387,7 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
 }
 fn send_group_message(sender: &Arc<Client>, message: &Vec<u8>, group: &String){
     let mut write_buf = vec![];
-    write_buf.push(3u8);
+    write_buf.push(SendMessageType::DataMessage as u8);
     write_buf.extend_from_slice(&sender.id.to_be_bytes());
     write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
     write_buf.extend_from_slice(message);
@@ -575,7 +635,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                         let room_option = client.room.read().unwrap();
                         let room = room_option.as_ref().unwrap();
                         let room_clients = room.clients.read().unwrap(); //we finally got to the room!
-                        buf[0] = 3u8; //messages are always 3s, even though this came in as 4 
+                        buf[0] = SendMessageType::DataMessage as u8; //messages are always 3s, even though this came in as 4 
                         for (_k,v) in room_clients.iter() {
                             
                             let ip = v.ip.read().unwrap();
@@ -610,7 +670,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
 
                         //we need to form a new message without the group name 
                         let mut message_to_send = vec![];
-                        message_to_send.push(3u8);
+                        message_to_send.push(SendMessageType::DataMessage as u8);
                         message_to_send.extend([buf[1],buf[2],buf[3],buf[4]]);
                         message_to_send.extend(message_bytes);
                         
