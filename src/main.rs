@@ -43,6 +43,7 @@ struct Client {
     logged_in: Arc<RwLock<bool>>,
     id: u32,
     username: Arc<RwLock<String>>, 
+    application: Arc<RwLock<String>>,
     room: Arc<RwLock<Option<Arc<Room>>>>, 
     sender: SyncSender<Vec<u8>>,
     rooms_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>,
@@ -94,12 +95,15 @@ fn read_vec(stream: &mut TcpStream) -> Vec<u8> {
 //this is in response to someone asking to login (this is where usernames and passwords would be processed, in theory)
 fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
     //byte,shortstring,byte,shortstring
+    
     let username = read_short_string(stream);
-    let password = read_short_string(stream);
+    let application = read_short_string(stream);
 
-    println!("Got username {} and password {}",username,password);
+    println!("Got application {} and userid {}",application,username);
     let mut client_user = client.username.write().unwrap();
     *client_user = username;
+    let mut client_application = client.application.write().unwrap();
+    *client_application = application;
     let mut client_loggedin = client.logged_in.write().unwrap();
     *client_loggedin = true;
     let mut write_buf = vec![];
@@ -120,8 +124,17 @@ fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
     let rooms = client.rooms_mutex.read().unwrap();
     let mut rooms_vec = vec![];
     for (k,v) in rooms.iter() {
+        let room_name = &client.application.read().unwrap().to_string();
+        if !k.starts_with(room_name) {
+            continue;
+        }
         let clients = v.clients.read().unwrap();
-        let room_string = format!("{}:{}",k,clients.len());
+        let mut iter = k.chars();
+        let app_name = client.application.read().unwrap();
+        iter.by_ref().nth(app_name.len());
+        let application_stripped_room = iter.as_str();
+
+        let room_string = format!("{}:{}",application_stripped_room,clients.len());
         rooms_vec.push(room_string);
     }
     
@@ -279,7 +292,10 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
 fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
     //byte,shortstring
     let mut room_name = read_short_string(stream);
-    room_name = room_name.trim().to_string();
+    let application = client.application.read().unwrap().to_string();
+    room_name = format!("{}_{}", application, room_name);
+
+
     println!("Got room message {}",room_name);
 
    
@@ -300,8 +316,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
         println!("Empty room, leaving");
         return;
     }
-    
-    
+
     
     
     //join room_name
@@ -327,11 +342,16 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
                 let mut room = client.room.write().unwrap(); 
                 *room = Some(rooms.get(&room_name).unwrap().clone()); //we create an option and assign it back to the room
             }
+
+            let mut iter = room_name.chars();
+            let app_name = client.application.read().unwrap();
+            iter.by_ref().nth(app_name.len());
+            let application_stripped_room = iter.as_str();
             
             //send a join message to everyone in the room (except the client)
             for (_k,v) in clients.iter() {
                 if v.id != client.id {
-                    send_client_join_message(v, client.id, &room_name);
+                    send_client_join_message(v, client.id, &application_stripped_room);
                 }
             }
 
@@ -341,8 +361,10 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
                 ids_in_room.push(v.id);
                 
             }
+
+
             
-            send_you_joined_message(client, ids_in_room, &room_name);
+            send_you_joined_message(client, ids_in_room, &application_stripped_room);
 
 
             let room = client.room.read().unwrap(); 
@@ -542,6 +564,7 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<Ha
         username: Arc::new(RwLock::new(String::from(""))),
         logged_in: Arc::new(RwLock::new(false)),
         room: Arc::new(RwLock::new(Option::None)),
+        application: Arc::new(RwLock::new(String::from(""))),
         sender: tx,
         rooms_mutex: rooms_mutex.clone(),
         clients_mutex: clients_mutex.clone(),
