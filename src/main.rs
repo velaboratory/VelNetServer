@@ -6,7 +6,7 @@ use std::sync::{Arc,RwLock};
 use std::sync::mpsc;
 use std::sync::mpsc::{SyncSender,Receiver};
 
-enum SendMessageType {
+enum ToClientTCPMessageType {
     LoggedIn = 0, 
     RoomList = 1,
     PlayerJoined = 2,
@@ -15,6 +15,29 @@ enum SendMessageType {
     YouJoined = 5,
     PlayerLeft = 6,
     YouLeft = 7
+}
+
+enum FromClientTCPMessageType {
+    LogIn = 0,
+    GetRooms = 1,
+    JoinRoom = 2,
+    SendMessageOthersUnbuffered = 3,
+    SendMessageAllUnbuffered = 4,
+    SendMessageGroupUnbuffered = 5,
+    CreateGroup = 6,
+    SendMessageOthersBuffered = 7,
+    SendMessageAllBuffered = 8
+}
+
+enum ToClientUDPMessageType {
+    Connected = 0,
+    DataMessage = ToClientTCPMessageType::DataMessage as isize
+}
+enum FromClientUDPMessageType {
+    Connect = 0,
+    SendMesssageOthersUnbuffered = FromClientTCPMessageType::SendMessageOthersUnbuffered as isize,
+    SendMessageAllUnbuffered = FromClientTCPMessageType::SendMessageAllUnbuffered as isize,
+    SendMessageGroupUnbuffered = FromClientTCPMessageType::SendMessageGroupUnbuffered as isize
 }
 struct Client {
     logged_in: Arc<RwLock<bool>>,
@@ -80,7 +103,7 @@ fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
     let mut client_loggedin = client.logged_in.write().unwrap();
     *client_loggedin = true;
     let mut write_buf = vec![];
-    write_buf.push(SendMessageType::LoggedIn as u8);
+    write_buf.push(ToClientTCPMessageType::LoggedIn as u8);
     write_buf.extend_from_slice(&(client.id).to_be_bytes()); //send the client the id
 
     client.sender.send(write_buf).unwrap();
@@ -91,7 +114,7 @@ fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
     println!("Got rooms message");
 
     let mut write_buf = vec![];
-    write_buf.push(SendMessageType::RoomList as u8);
+    write_buf.push(ToClientTCPMessageType::RoomList as u8);
     //first we need to get the room names
 
     let rooms = client.rooms_mutex.read().unwrap();
@@ -115,7 +138,7 @@ fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
 fn send_client_master_message(to: &Arc<Client>, master_id: u32){
   //2u8, person_id_u32, room_name_len_u8, room_name_bytes
   let mut write_buf = vec![];
-  write_buf.push(SendMessageType::MasterMessage as u8);
+  write_buf.push(ToClientTCPMessageType::MasterMessage as u8);
   write_buf.extend_from_slice(&(master_id).to_be_bytes()); //send everyone that the client id joined the room
   let res = to.sender.send(write_buf);
   match res {
@@ -128,7 +151,7 @@ fn send_client_master_message(to: &Arc<Client>, master_id: u32){
 fn send_client_join_message(to: &Arc<Client>, from: u32, room: &str){
     //2u8, person_id_u32, room_name_len_u8, room_name_bytes
     let mut write_buf = vec![];
-    write_buf.push(SendMessageType::PlayerJoined as u8);
+    write_buf.push(ToClientTCPMessageType::PlayerJoined as u8);
     write_buf.extend_from_slice(&(from).to_be_bytes()); //send everyone that the client id joined the room
     write_buf.push(room.as_bytes().len() as u8); 
     write_buf.extend_from_slice(room.as_bytes());
@@ -142,7 +165,7 @@ fn send_client_join_message(to: &Arc<Client>, from: u32, room: &str){
 fn send_you_joined_message(to: &Arc<Client>, in_room: Vec<u32>, room: &str){
     //you_joined_u8, ids_len_u32, id_list_array_u32, room_name_len_u8, room_name_bytes
     let mut write_buf = vec![];
-    write_buf.push(SendMessageType::YouJoined as u8);
+    write_buf.push(ToClientTCPMessageType::YouJoined as u8);
     write_buf.extend_from_slice(&(in_room.len() as u32).to_be_bytes());  
     for id in in_room {
         write_buf.extend_from_slice(&(id).to_be_bytes());
@@ -158,7 +181,7 @@ fn send_you_joined_message(to: &Arc<Client>, in_room: Vec<u32>, room: &str){
 
 fn send_you_left_message(to: &Arc<Client>, room: &str){
     let mut write_buf = vec![];
-    write_buf.push(SendMessageType::YouLeft as u8);
+    write_buf.push(ToClientTCPMessageType::YouLeft as u8);
     write_buf.push(room.as_bytes().len() as u8); 
     write_buf.extend_from_slice(room.as_bytes());
     let res = to.sender.send(write_buf);
@@ -169,7 +192,7 @@ fn send_you_left_message(to: &Arc<Client>, room: &str){
 }
 fn send_client_left_message(to: &Arc<Client>, from: u32, room: &str){
     let mut write_buf = vec![];
-    write_buf.push(SendMessageType::PlayerLeft as u8);
+    write_buf.push(ToClientTCPMessageType::PlayerLeft as u8);
     write_buf.extend_from_slice(&(from).to_be_bytes()); //send everyone that the client id left the room
     write_buf.push(room.as_bytes().len() as u8); 
     write_buf.extend_from_slice(room.as_bytes());
@@ -341,7 +364,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
 fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bool, ordered: bool){
     //this message is 3u8, sender_id_u32, message_len_u32, message_bytes
     let mut write_buf = vec![];
-    write_buf.push(SendMessageType::DataMessage as u8);
+    write_buf.push(ToClientTCPMessageType::DataMessage as u8);
     write_buf.extend_from_slice(&sender.id.to_be_bytes());
     write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
     write_buf.extend_from_slice(message);
@@ -387,7 +410,7 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
 }
 fn send_group_message(sender: &Arc<Client>, message: &Vec<u8>, group: &String){
     let mut write_buf = vec![];
-    write_buf.push(SendMessageType::DataMessage as u8);
+    write_buf.push(ToClientTCPMessageType::DataMessage as u8);
     write_buf.extend_from_slice(&sender.id.to_be_bytes());
     write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
     write_buf.extend_from_slice(message);
@@ -411,15 +434,15 @@ fn read_send_message(stream: &mut TcpStream, client: &Arc<Client>, message_type:
     //4 byte length, array
     //this is a message for everyone in the room (maybe)
     let to_send = read_vec(stream);
-    if message_type == 3 {
+    if message_type == FromClientTCPMessageType::SendMessageOthersUnbuffered as u8 {
        send_room_message(client,&to_send,false,false);
-    }else if message_type == 4 {
+    }else if message_type == FromClientTCPMessageType::SendMessageAllUnbuffered as u8 {
        send_room_message(client,&to_send,true,false);
-    } else if message_type == 7 { //ordered
+    } else if message_type == FromClientTCPMessageType::SendMessageOthersBuffered as u8 { //ordered
         send_room_message(client,&to_send,false,true);
-     }else if message_type == 8 { //ordered
+     }else if message_type == FromClientTCPMessageType::SendMessageAllBuffered as u8 { //ordered
         send_room_message(client,&to_send,true,true);
-     }else if message_type == 5 {
+     }else if message_type == FromClientTCPMessageType::SendMessageGroupUnbuffered as u8 {
        let group = read_short_string(stream);
        send_group_message(client,&to_send, &group);
     }
@@ -472,15 +495,19 @@ fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
 
         //println!("Got a message {}",read_buf[0]);
         let t = read_buf[0];
-        if t == 0 { //[0:u8][username.length():u8][username:shortstring][password.length():u8][password:shortstring]
+        if t == FromClientTCPMessageType::LogIn as u8 { //[0:u8][username.length():u8][username:shortstring][password.length():u8][password:shortstring]
             read_login_message(&mut stream, &mut client);
-        } else if t == 1 {//[1:u8]
+        } else if t == FromClientTCPMessageType::GetRooms as u8 {//[1:u8]
             read_rooms_message(&mut stream, &mut client);
-        } else if t == 2 {//[2:u8][roomname.length():u8][roomname:shortstring]
+        } else if t == FromClientTCPMessageType::JoinRoom as u8 {//[2:u8][roomname.length():u8][roomname:shortstring]
             read_join_message(&mut stream, &mut client); 
-        } else if t == 3 || t == 4 || t==5 || t==7 || t==8 { //others,all,group[t:u8][message.length():i32][message:u8array]
+        } else if t == FromClientTCPMessageType::SendMessageOthersUnbuffered as u8 || 
+                  t == FromClientTCPMessageType::SendMessageAllUnbuffered as u8 || 
+                  t == FromClientTCPMessageType::SendMessageGroupUnbuffered as u8 || 
+                  t == FromClientTCPMessageType::SendMessageOthersBuffered as u8 || 
+                  t == FromClientTCPMessageType::SendMessageAllBuffered as u8 { //others,all,group[t:u8][message.length():i32][message:u8array]
             read_send_message(&mut stream, &client, t);
-        } else if t == 6 { //[t:u8][list.lengthbytes:i32][clients:i32array]
+        } else if t == FromClientTCPMessageType::CreateGroup as u8 { //[t:u8][list.lengthbytes:i32][clients:i32array]
             read_group_message(&mut stream, &client);
         }
             
@@ -580,8 +607,12 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
     let s = UdpSocket::bind("0.0.0.0:80").unwrap();
     println!("UDP Thread Started");
     loop {
-        let (packet_size,addr) = s.recv_from(&mut buf).unwrap();
-        
+        let res = s.recv_from(&mut buf);
+        match res {
+            Ok(_) => (),
+            Err(_) => continue
+        }
+        let (packet_size,addr) = res.unwrap();
         let t = buf[0];
         if packet_size >= 5{
             //get the client id, which has to be sent with every udp message, because you don't know where udp messages are coming from
@@ -590,7 +621,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
 
             
 
-            if t == 0 { //1 byte, 0.  Nothing else.  This is just to establish the udp port, Echos back the same thing sent
+            if t == FromClientUDPMessageType::Connect as u8 { //1 byte, 0.  Nothing else.  This is just to establish the udp port, Echos back the same thing sent
                 //connect message, respond back
                 {
                     let clients = client_mutex.read().unwrap();
@@ -598,6 +629,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                         let client = clients.get(&client_id).unwrap();
                         let mut port = client.port.write().unwrap();
                         *port = addr.port(); //set the udp port to send data to
+                        buf[0] = ToClientUDPMessageType::Connected as u8;
                         match s.send_to(&buf,addr) {
                             Ok(_)=>(),
                             Err(_)=>()
@@ -606,7 +638,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                 }
                 
                 
-            } else if t == 3 { //[3:u8][from:i32][contents:u8array] note that it must fit into the packet of 1024 bytes
+            } else if t == FromClientUDPMessageType::SendMesssageOthersUnbuffered as u8 { //[3:u8][from:i32][contents:u8array] note that it must fit into the packet of 1024 bytes
                 {
                     let clients = client_mutex.read().unwrap();
                     if clients.contains_key(&client_id){
@@ -614,6 +646,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                         let room_option = client.room.read().unwrap();
                         let room = room_option.as_ref().unwrap();
                         let room_clients = room.clients.read().unwrap(); //we finally got to the room!
+                        buf[0] = ToClientUDPMessageType::DataMessage as u8; //technically unecessary, unless we change this number
                         for (_k,v) in room_clients.iter() {
                             if v.id != client_id{
                                 let ip = v.ip.read().unwrap();
@@ -627,7 +660,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                     }
                 }
 
-            } else if t == 4 { //see above
+            } else if t == FromClientUDPMessageType::SendMessageAllUnbuffered as u8 { //see above
                 {
                     let clients = client_mutex.read().unwrap();
                     if clients.contains_key(&client_id){
@@ -635,7 +668,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                         let room_option = client.room.read().unwrap();
                         let room = room_option.as_ref().unwrap();
                         let room_clients = room.clients.read().unwrap(); //we finally got to the room!
-                        buf[0] = SendMessageType::DataMessage as u8; //messages are always 3s, even though this came in as 4 
+                        buf[0] = ToClientUDPMessageType::DataMessage as u8; //messages are always 3s, even though this came in as 4 
                         for (_k,v) in room_clients.iter() {
                             
                             let ip = v.ip.read().unwrap();
@@ -648,7 +681,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
                         }
                     }
                 }
-            } else if t == 5 { //[5:byte][from:i32][group.length():u8][message:u8array]
+            } else if t == FromClientUDPMessageType::SendMessageGroupUnbuffered as u8 { //[5:byte][from:i32][group.length():u8][message:u8array]
                 //this one is a little different, because we don't send the group in the message, so we have to formulate another message (like a 3 message)
                 //send a message to a group
                 //read the group name
@@ -670,7 +703,7 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
 
                         //we need to form a new message without the group name 
                         let mut message_to_send = vec![];
-                        message_to_send.push(SendMessageType::DataMessage as u8);
+                        message_to_send.push(ToClientUDPMessageType::DataMessage as u8);
                         message_to_send.extend([buf[1],buf[2],buf[3],buf[4]]);
                         message_to_send.extend(message_bytes);
                         
