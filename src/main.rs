@@ -333,12 +333,12 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
 
 fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
     //byte,shortstring
-    let mut room_name = read_short_string(stream);
+    let short_room_name = read_short_string(stream);
     let application = client.application.read().unwrap().to_string();
-    room_name = format!("{}_{}", application, room_name);
+    let mut extended_room_name = format!("{}_{}", application, short_room_name);
 
 
-    println!("Got room message {}",room_name);
+    println!("Got room message {}",short_room_name);
 
    
     //if the client is in a room, leave it
@@ -354,7 +354,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
         client_leave_room(client, true); 
     }
 
-    if room_name.trim() == "" || room_name == "-1" {
+    if short_room_name.trim() == "" || short_room_name == "-1" {
         println!("Empty room, leaving");
         return;
     }
@@ -364,36 +364,32 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
     //join room_name
     {
         let mut rooms = client.rooms_mutex.write().unwrap(); 
-        if !rooms.contains_key(&room_name) { //new room, must create it
+        if !rooms.contains_key(&extended_room_name) { //new room, must create it
             let map: HashMap<u32, Arc<Client>> = HashMap::new();
             let r = Arc::new(Room {
-                name: room_name.to_string(),
+                name: extended_room_name.to_string(),
                 clients: RwLock::new(map),
                 master_client: Arc::new(RwLock::new(client.clone())) //client is the master, since they joined first
             });
-            rooms.insert(String::from(&room_name),r);
-            println!("New room {} created",&room_name);
+            rooms.insert(String::from(&extended_room_name),r);
+            println!("New room {} created",&extended_room_name);
         }
         
         //the room is guaranteed to exist now
         {
-            let mut clients = rooms[&room_name].clients.write().unwrap(); 
+            let mut clients = rooms[&extended_room_name].clients.write().unwrap(); 
             clients.insert(client.id,client.clone());
-            println!("Client {} joined {}",client.id,&room_name);
+            println!("Client {} joined {}",client.id,&extended_room_name);
             {
                 let mut room = client.room.write().unwrap(); 
-                *room = Some(rooms.get(&room_name).unwrap().clone()); //we create an option and assign it back to the room
+                *room = Some(rooms.get(&extended_room_name).unwrap().clone()); //we create an option and assign it back to the room
             }
 
-            let mut iter = room_name.chars();
-            let app_name = client.application.read().unwrap();
-            iter.by_ref().nth(app_name.len());
-            let application_stripped_room = iter.as_str();
-            
+                        
             //send a join message to everyone in the room (except the client)
             for (_k,v) in clients.iter() {
                 if v.id != client.id {
-                    send_client_join_message(v, client.id, &application_stripped_room);
+                    send_client_join_message(v, client.id, &short_room_name);
                 }
             }
 
@@ -405,8 +401,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
             }
 
 
-            
-            send_you_joined_message(client, ids_in_room, &application_stripped_room);
+            send_you_joined_message(client, ids_in_room, &short_room_name);
 
 
             let room = client.room.read().unwrap(); 
