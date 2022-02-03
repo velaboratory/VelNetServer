@@ -156,9 +156,9 @@ fn read_roomdata_message(stream: &mut TcpStream, client: &Arc<Client>){
 
     //read the room name and append the client application
 
-    let mut room_name = read_short_string(stream);
+    let short_room_name = read_short_string(stream);
     let application = client.application.read().unwrap().to_string();
-    room_name = format!("{}_{}", application, room_name);
+    let room_name = format!("{}_{}", application, short_room_name);
     println!("{}",&room_name);
     //we need to access the rooms list
     let rooms = client.rooms_mutex.read().unwrap(); 
@@ -168,6 +168,12 @@ fn read_roomdata_message(stream: &mut TcpStream, client: &Arc<Client>){
         //form and send the message
         let mut write_buf = vec![];
         write_buf.push(ToClientTCPMessageType::RoomData as u8);
+
+        
+        let roomname_bytes = short_room_name.as_bytes();
+        write_buf.push(roomname_bytes.len() as u8);
+        write_buf.extend_from_slice(&roomname_bytes);
+
         let clients = room.clients.read().unwrap();
         write_buf.extend_from_slice(&(clients.len() as u32).to_be_bytes());
         for (_k,c) in clients.iter() {
