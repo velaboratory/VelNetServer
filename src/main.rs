@@ -14,7 +14,8 @@ enum ToClientTCPMessageType {
     MasterMessage = 4,
     YouJoined = 5,
     PlayerLeft = 6,
-    YouLeft = 7
+    YouLeft = 7,
+    RoomData = 8
 }
 
 enum FromClientTCPMessageType {
@@ -26,7 +27,8 @@ enum FromClientTCPMessageType {
     SendMessageGroupUnbuffered = 5,
     CreateGroup = 6,
     SendMessageOthersBuffered = 7,
-    SendMessageAllBuffered = 8
+    SendMessageAllBuffered = 8,
+    GetRoomData =9
 }
 
 enum ToClientUDPMessageType {
@@ -145,6 +147,40 @@ fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
     write_buf.extend_from_slice(message_bytes);
     client.sender.send(write_buf).unwrap();
     
+}
+
+fn read_roomdata_message(stream: &mut TcpStream, client: &Arc<Client>){
+    //type, room_name
+    //will respond with type, numclients u32, id1 u32, name_len u8, name_bytes ...
+    println!("Got room data message");
+
+    //read the room name and append the client application
+
+    let mut room_name = read_short_string(stream);
+    let application = client.application.read().unwrap().to_string();
+    room_name = format!("{}_{}", application, room_name);
+    println!("{}",&room_name);
+    //we need to access the rooms list
+    let rooms = client.rooms_mutex.read().unwrap(); 
+    if rooms.contains_key(&room_name) { 
+        println!("the room exists");
+        let room = rooms.get(&room_name).unwrap();
+        //form and send the message
+        let mut write_buf = vec![];
+        write_buf.push(ToClientTCPMessageType::RoomData as u8);
+        let clients = room.clients.read().unwrap();
+        write_buf.extend_from_slice(&(clients.len() as u32).to_be_bytes());
+        for (_k,c) in clients.iter() {
+            //write out the client id (u32) and the username (short string)
+            write_buf.extend_from_slice(&(c.id).to_be_bytes());
+            let username = c.username.read().unwrap();
+            let username_bytes = username.as_bytes();
+            write_buf.push(username_bytes.len() as u8);
+            write_buf.extend_from_slice(&username_bytes);
+        }
+        client.sender.send(write_buf).unwrap();
+    }
+
 }
 
 
@@ -521,6 +557,8 @@ fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
             read_login_message(&mut stream, &mut client);
         } else if t == FromClientTCPMessageType::GetRooms as u8 {//[1:u8]
             read_rooms_message(&mut stream, &mut client);
+        } else if t == FromClientTCPMessageType::GetRoomData as u8 {
+            read_roomdata_message(&mut stream, &mut client);
         } else if t == FromClientTCPMessageType::JoinRoom as u8 {//[2:u8][roomname.length():u8][roomname:shortstring]
             read_join_message(&mut stream, &mut client); 
         } else if t == FromClientTCPMessageType::SendMessageOthersUnbuffered as u8 || 
