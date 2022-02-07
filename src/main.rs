@@ -126,13 +126,14 @@ fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
     let rooms = client.rooms_mutex.read().unwrap();
     let mut rooms_vec = vec![];
     for (k,v) in rooms.iter() {
-        let room_name = &client.application.read().unwrap().to_string();
-        if !k.starts_with(room_name) {
+        let app_name = client.application.read().unwrap();
+        
+        if !k.starts_with(&app_name.to_string()) {
             continue;
         }
         let clients = v.clients.read().unwrap();
         let mut iter = k.chars();
-        let app_name = client.application.read().unwrap();
+        
         iter.by_ref().nth(app_name.len());
         let application_stripped_room = iter.as_str();
 
@@ -335,7 +336,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
     //byte,shortstring
     let short_room_name = read_short_string(stream);
     let application = client.application.read().unwrap().to_string();
-    let mut extended_room_name = format!("{}_{}", application, short_room_name);
+    let extended_room_name = format!("{}_{}", application, short_room_name);
 
 
     println!("Got room message {}",short_room_name);
@@ -508,10 +509,13 @@ fn read_send_message(stream: &mut TcpStream, client: &Arc<Client>, message_type:
 }
 
 fn read_group_message(stream: &mut TcpStream, client: &Arc<Client>){
-    let mut groups = client.groups.write().unwrap();
+    
     let group = read_short_string(stream);
+    println!("Got group message {}",&group);
     let id_bytes = read_vec(stream);
     let num = id_bytes.len();
+    
+    let mut groups = client.groups.write().unwrap();
     let clients = client.clients_mutex.read().unwrap();
     let mut group_clients = vec![];
     let mut i = 0;
