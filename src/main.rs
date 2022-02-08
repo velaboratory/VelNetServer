@@ -264,70 +264,79 @@ fn send_client_left_message(to: &Arc<Client>, from: u32, room: &str){
 fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
     //first remove the client from the room they are in
     
-    let mut room = client.room.write().unwrap(); //I need to get the room, because I'll be modifying the clients in it
-    
-    if room.is_some(){
-        {
-            println!("Client in room, leaving");
-            let room = room.as_ref().unwrap();
+    {
+        let room = client.room.read().unwrap(); //I need to get the room, because I'll be modifying the clients in it
+        if room.is_some(){
+            {
+                let mut change_master = false;
+                let mut new_master_id = 0;
+                println!("Client in room, leaving");
+                let room = room.as_ref().unwrap();
 
-            //may have to choose a new master
-            let mut master_client = room.master_client.write().unwrap();
-            let mut change_master = false;
-            let mut clients = room.clients.write().unwrap();
+                //may have to choose a new master
+               
+                {
+                    
+                    let clients = room.clients.read().unwrap();
+                    let master_client = room.master_client.read().unwrap();
+                    if master_client.id == client.id {
+                        println!("Will change master");
+                        //change the master
+                        change_master = true;
+                        for (_k,v) in clients.iter() {
+                            if v.id != client.id {
+                                new_master_id = v.id;
+                                break;
+                            }
+                        }
+                    }
 
-            let mut new_master_id = 0;
-
-            if master_client.id == client.id {
-                println!("Will change master");
-                //change the master
-                change_master = true;
-                for (_k,v) in clients.iter() {
-                    if v.id != client.id {
-                        new_master_id = v.id;
-                        break;
+                    println!("Client leaving current room {}",&room.name);
+                            
+                    for (_k,v) in clients.iter() {
+                        if !send_to_client && v.id == client.id{
+                            continue;
+                        }else if v.id == client.id {
+                            send_you_left_message(v, &room.name);
+                        }else{
+                            send_client_left_message(v, client.id, &room.name); 
+                        }
                     }
                 }
-            }
 
-
-
-            println!("Client leaving current room {}",&room.name);
-                       
-            
-            for (_k,v) in clients.iter() {
-                if !send_to_client && v.id == client.id{
-                    continue;
-                }else if v.id == client.id {
-                    send_you_left_message(v, &room.name);
-                }else{
-                    send_client_left_message(v, client.id, &room.name); 
-                }
-            }
-            clients.remove(&client.id); //remove the client from that list in the room
-
-            //if the room is empty, destroy it as well
-            
-            if clients.len() == 0 {
-                let mut rooms = client.rooms_mutex.write().unwrap(); 
-                rooms.remove(&room.name);
-                println!("Destroyed room {}",&room.name)
-            }else if change_master{
-                println!("Changing master to {}",new_master_id);
-                for (_k,v) in clients.iter() {
-                    send_client_master_message(&v, new_master_id);
+                {
+                    let mut clients = room.clients.write().unwrap();
+                    clients.remove(&client.id); //remove the client from that list in the room
                 }
 
+                let clients = room.clients.read().unwrap();
+
+                //if the room is empty, destroy it as well
                 
-                *master_client = clients.get(&new_master_id).unwrap().clone();
-                
+                if clients.len() == 0 {
+                    let mut rooms = client.rooms_mutex.write().unwrap(); 
+                    rooms.remove(&room.name);
+                    println!("Destroyed room {}",&room.name)
+                }else if change_master{
+                    println!("Changing master to {}",new_master_id);
+                    for (_k,v) in clients.iter() {
+                        send_client_master_message(&v, new_master_id);
+                    }
+                    {
+                        let mut master_client = room.master_client.write().unwrap();
+                        *master_client = clients.get(&new_master_id).unwrap().clone();
+                    }
+                    
+                }
             }
+        } else{
+            println!("Client not in room");
         }
-    } else{
-        println!("Client not in room");
     }
-    
-    *room = Option::None;
+    {
+        let mut room = client.room.write().unwrap();
+        *room = Option::None;
+    }
     
 
 }
