@@ -264,7 +264,7 @@ fn send_client_left_message(to: &Arc<Client>, from: u32, room: &str){
 fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
     //first remove the client from the room they are in
     
-    let mut room = client.room.write().unwrap();
+    let mut room = client.room.write().unwrap(); //I need to get the room, because I'll be modifying the clients in it
     
     if room.is_some(){
         {
@@ -378,15 +378,20 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
         
         //the room is guaranteed to exist now
         {
-            let mut clients = rooms[&extended_room_name].clients.write().unwrap(); 
-            clients.insert(client.id,client.clone());
-            println!("Client {} joined {}",client.id,&extended_room_name);
+            { //actually add the client to the room (need a write lock)
+                let mut clients = rooms[&extended_room_name].clients.write().unwrap(); 
+                clients.insert(client.id,client.clone());
+            }
             {
-                let mut room = client.room.write().unwrap(); 
-                *room = Some(rooms.get(&extended_room_name).unwrap().clone()); //we create an option and assign it back to the room
+                println!("Client {} joined {}",client.id,&extended_room_name);
+                {
+                    let mut room = client.room.write().unwrap(); 
+                    *room = Some(rooms.get(&extended_room_name).unwrap().clone()); //we create an option and assign it back to the room
+                }
             }
 
-                        
+            let clients = rooms[&extended_room_name].clients.read().unwrap();  //only need a read lock now
+
             //send a join message to everyone in the room (except the client)
             for (_k,v) in clients.iter() {
                 if v.id != client.id {
