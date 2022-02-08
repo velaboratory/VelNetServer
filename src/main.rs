@@ -374,7 +374,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
     //join room_name
     {
         {
-            let rooms = client.rooms_mutex.read().unwrap(); 
+            let mut rooms = client.rooms_mutex.write().unwrap(); 
             if !rooms.contains_key(&extended_room_name) { //new room, must create it
                 let map: HashMap<u32, Arc<Client>> = HashMap::new();
                 let r = Arc::new(Room {
@@ -382,7 +382,7 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
                     clients: RwLock::new(map),
                     master_client: Arc::new(RwLock::new(client.clone())) //client is the master, since they joined first
                 });
-                let mut rooms = client.rooms_mutex.write().unwrap(); 
+                
                 rooms.insert(String::from(&extended_room_name),r);
                 println!("New room {} created",&extended_room_name);
             }
