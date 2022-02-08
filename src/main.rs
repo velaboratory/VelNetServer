@@ -364,34 +364,38 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
     
     //join room_name
     {
-        let mut rooms = client.rooms_mutex.write().unwrap(); 
-        if !rooms.contains_key(&extended_room_name) { //new room, must create it
-            let map: HashMap<u32, Arc<Client>> = HashMap::new();
-            let r = Arc::new(Room {
-                name: extended_room_name.to_string(),
-                clients: RwLock::new(map),
-                master_client: Arc::new(RwLock::new(client.clone())) //client is the master, since they joined first
-            });
-            rooms.insert(String::from(&extended_room_name),r);
-            println!("New room {} created",&extended_room_name);
-        }
-        
-        //the room is guaranteed to exist now
         {
-            { //actually add the client to the room (need a write lock)
-                let mut clients = rooms[&extended_room_name].clients.write().unwrap(); 
-                clients.insert(client.id,client.clone());
+            let rooms = client.rooms_mutex.read().unwrap(); 
+            if !rooms.contains_key(&extended_room_name) { //new room, must create it
+                let map: HashMap<u32, Arc<Client>> = HashMap::new();
+                let r = Arc::new(Room {
+                    name: extended_room_name.to_string(),
+                    clients: RwLock::new(map),
+                    master_client: Arc::new(RwLock::new(client.clone())) //client is the master, since they joined first
+                });
+                let mut rooms = client.rooms_mutex.write().unwrap(); 
+                rooms.insert(String::from(&extended_room_name),r);
+                println!("New room {} created",&extended_room_name);
             }
-            {
-                println!("Client {} joined {}",client.id,&extended_room_name);
-                {
-                    let mut room = client.room.write().unwrap(); 
-                    *room = Some(rooms.get(&extended_room_name).unwrap().clone()); //we create an option and assign it back to the room
-                }
-            }
-
+        }
+        //the room is guaranteed to exist now
+        
+        { //actually add the client to the room (need a write lock)
+            let rooms = client.rooms_mutex.read().unwrap(); 
+            let mut clients = rooms[&extended_room_name].clients.write().unwrap(); 
+            clients.insert(client.id,client.clone());
+        }
+        {
+            println!("Client {} joined {}",client.id,&extended_room_name);
+            
+            let rooms = client.rooms_mutex.read().unwrap(); 
+            let mut room = client.room.write().unwrap(); 
+            *room = Some(rooms.get(&extended_room_name).unwrap().clone()); //we create an option and assign it back to the room
+            
+        }
+        {
+            let rooms = client.rooms_mutex.read().unwrap(); 
             let clients = rooms[&extended_room_name].clients.read().unwrap();  //only need a read lock now
-
             //send a join message to everyone in the room (except the client)
             for (_k,v) in clients.iter() {
                 if v.id != client.id {
@@ -405,16 +409,15 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
                 ids_in_room.push(v.id);
                 
             }
-
-
             send_you_joined_message(client, ids_in_room, &short_room_name);
-
-
-            let room = client.room.read().unwrap(); 
-            //tell the client who the master is
-            let master_client = room.as_ref().unwrap().master_client.read().unwrap();
-            send_client_master_message(client, master_client.id);
         }
+
+
+        let room = client.room.read().unwrap(); 
+        //tell the client who the master is
+        let master_client = room.as_ref().unwrap().master_client.read().unwrap();
+        send_client_master_message(client, master_client.id);
+        
     }
     
 }
