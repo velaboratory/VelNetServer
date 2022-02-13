@@ -323,7 +323,7 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
                     }
 
                     {
-                        println!("{}: Changing master to {}",client.application.read().unwrap().to_string(), new_master_id);
+                        println!("{}: {}: Changing master to {}",Local::now().format("%Y-%m-%d %H:%M:%S"),client.application.read().unwrap().to_string(), new_master_id);
                     }
                     for (_k,v) in clients.iter() {
                         send_client_master_message(&v, new_master_id);
