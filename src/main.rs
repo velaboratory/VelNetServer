@@ -320,7 +320,7 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
                             break;
                         }
                     }
-                    
+
                     println!("Changing master to {}",new_master_id);
                     for (_k,v) in clients.iter() {
                         send_client_master_message(&v, new_master_id);
@@ -389,22 +389,17 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
                 rooms.insert(String::from(&extended_room_name),r);
                 println!("New room {} created",&extended_room_name);
             }
-        }
-        //the room is guaranteed to exist now
-        
-        { //actually add the client to the room (need a write lock)
-            let rooms = client.rooms_mutex.read().unwrap(); 
-            let mut clients = rooms[&extended_room_name].clients.write().unwrap(); 
+            //the room is guaranteed to exist now, so this call can't fail
+            let room_to_join = &rooms[&extended_room_name];
+            let mut clients = room_to_join.clients.write().unwrap(); 
             clients.insert(client.id,client.clone());
-        }
-        {
             println!("Client {} joined {}",client.id,&extended_room_name);
-            
-            let rooms = client.rooms_mutex.read().unwrap(); 
             let mut room = client.room.write().unwrap(); 
-            *room = Some(rooms.get(&extended_room_name).unwrap().clone()); //we create an option and assign it back to the room
-            
+            *room = Some(room_to_join.clone()); //we create an option and assign it back to the room
         }
+    
+        //once the client is in the room, it can't suddenly die, so we can release the write lock, and can use the extended_room name without issue
+        
         {
             let rooms = client.rooms_mutex.read().unwrap(); 
             let clients = rooms[&extended_room_name].clients.read().unwrap();  //only need a read lock now
