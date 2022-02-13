@@ -1,5 +1,6 @@
 extern crate chrono;
-
+extern crate serde;
+extern crate serde_json;
 use std::io::prelude::*;
 use std::thread;
 use std::net::{TcpListener, TcpStream,UdpSocket,IpAddr,SocketAddr};
@@ -8,6 +9,9 @@ use std::sync::{Arc,RwLock};
 use std::sync::mpsc;
 use std::sync::mpsc::{SyncSender,Receiver};
 use chrono::Local;
+use std::fs;
+use std::fmt;
+use serde::{Serialize, Deserialize};
 enum ToClientTCPMessageType {
     LoggedIn = 0, 
     RoomList = 1,
@@ -62,7 +66,10 @@ struct Room {
     clients: RwLock<HashMap<u32,Arc<Client>>>,
     master_client: Arc<RwLock<Arc<Client>>>
 }
-
+#[derive(Serialize, Deserialize)]
+struct Config {
+    port: u16
+}
 
 
 fn read_u8(stream: &mut TcpStream) -> u8 {
@@ -666,9 +673,9 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<Ha
     
 }
 
-fn tcp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, room_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>){
+fn tcp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, room_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>,port:u16){
     println!("{}: Started TCP Listener",Local::now().format("%Y-%m-%d %H:%M:%S"));
-    let listener = TcpListener::bind("0.0.0.0:80").expect("could not bind port");
+    let listener = TcpListener::bind(format!("0.0.0.0:{}",port)).expect("could not bind port");
 
     let mut next_client_id = 0;
     // accept connections and process them serially
@@ -681,9 +688,9 @@ fn tcp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, room_mutex: 
     println!("{}: Ended TCP Listener",Local::now().format("%Y-%m-%d %H:%M:%S"));
 }
 
-fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>){
+fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>,port:u16){
     let mut buf = [0u8;1024];
-    let s = UdpSocket::bind("0.0.0.0:80").unwrap();
+    let s = UdpSocket::bind(format!("0.0.0.0:{}",port)).unwrap();
     println!("{}: UDP Thread Started",Local::now().format("%Y-%m-%d %H:%M:%S"));
     loop {
         let res = s.recv_from(&mut buf);
@@ -814,6 +821,11 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
 fn main() {
     println!("{}: VelNet Server Starting",Local::now().format("%Y-%m-%d %H:%M:%S"));
     
+    //read the config file
+    let foo = fs::read_to_string("config.txt").unwrap();
+    let config: Config = serde_json::from_str(&foo).unwrap();
+    println!("{}",config.port);
+
     let clients: HashMap<u32, Arc<Client>> = HashMap::new();
     let rooms: HashMap<String, Arc<Room>> = HashMap::new();
     let client_mutex = Arc::new(RwLock::new(clients));
@@ -822,9 +834,9 @@ fn main() {
     //start the UDP thread
     let udp_clients = Arc::clone(&client_mutex);
     let udp_rooms = Arc::clone(&room_mutex);
-    let udp_handle = thread::spawn(move ||{udp_listen(udp_clients, udp_rooms);});
+    let udp_handle = thread::spawn(move ||{udp_listen(udp_clients, udp_rooms, config.port);});
     //start the TCP thread
-    tcp_listen(client_mutex, room_mutex);
+    tcp_listen(client_mutex, room_mutex,config.port);
     udp_handle.join().unwrap();
     println!("{}: VelNet Ended", Local::now().format("%Y-%m-%d %H:%M:%S"));
 }
