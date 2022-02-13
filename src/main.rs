@@ -283,12 +283,7 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
                         println!("Will change master");
                         //change the master
                         change_master = true;
-                        for (_k,v) in clients.iter() {
-                            if v.id != client.id {
-                                new_master_id = v.id;
-                                break;
-                            }
-                        }
+                        
                     }
 
                     println!("Client leaving current room {}",&room.name);
@@ -318,6 +313,14 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
                     rooms.remove(&room.name);
                     println!("Destroyed room {}",&room.name)
                 }else if change_master{
+
+                    for (_k,v) in clients.iter() {
+                        if v.id != client.id {
+                            new_master_id = v.id;
+                            break;
+                        }
+                    }
+                    
                     println!("Changing master to {}",new_master_id);
                     for (_k,v) in clients.iter() {
                         send_client_master_message(&v, new_master_id);
