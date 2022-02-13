@@ -564,7 +564,6 @@ fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
 
         //read exactly 1 byte
         stream.read_exact(&mut read_buf).unwrap();
-
         //println!("Got a message {}",read_buf[0]);
         let t = read_buf[0];
         if t == FromClientTCPMessageType::LogIn as u8 { //[0:u8][username.length():u8][username:shortstring][password.length():u8][password:shortstring]
@@ -583,6 +582,10 @@ fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
             read_send_message(&mut stream, &client, t);
         } else if t == FromClientTCPMessageType::CreateGroup as u8 { //[t:u8][list.lengthbytes:i32][clients:i32array]
             read_group_message(&mut stream, &client);
+        } else {
+            //die...not correct protocol
+            println!("Incorrect protocol, killing");
+            return;
         }
             
         std::io::stdout().flush().unwrap();
@@ -643,7 +646,7 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<Ha
         Err(_)=>()
     }
     
-    match client.sender.send(vec![0]){
+    match client.sender.send(vec![0]){ //force send thread to exit
         Ok(_)=>(),
         Err(_)=>()
     }
