@@ -1,3 +1,5 @@
+extern crate chrono;
+
 use std::io::prelude::*;
 use std::thread;
 use std::net::{TcpListener, TcpStream,UdpSocket,IpAddr,SocketAddr};
@@ -5,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc,RwLock};
 use std::sync::mpsc;
 use std::sync::mpsc::{SyncSender,Receiver};
-
+use chrono::Local;
 enum ToClientTCPMessageType {
     LoggedIn = 0, 
     RoomList = 1,
@@ -101,7 +103,7 @@ fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
     let username = read_short_string(stream);
     let application = read_short_string(stream);
 
-    println!("Got application {} and userid {}",application,username);
+    println!("{}: Got application {} and userid {}",Local::now().format("%Y-%m-%d %H:%M:%S"),application,username);
     let mut client_user = client.username.write().unwrap();
     *client_user = username;
     let mut client_application = client.application.write().unwrap();
@@ -117,7 +119,6 @@ fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
 
 //this is in response to a request for rooms.
 fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
-    println!("Got rooms message");
 
     let mut write_buf = vec![];
     write_buf.push(ToClientTCPMessageType::RoomList as u8);
@@ -153,18 +154,17 @@ fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
 fn read_roomdata_message(stream: &mut TcpStream, client: &Arc<Client>){
     //type, room_name
     //will respond with type, numclients u32, id1 u32, name_len u8, name_bytes ...
-    println!("Got room data message");
 
     //read the room name and append the client application
 
     let short_room_name = read_short_string(stream);
     let application = client.application.read().unwrap().to_string();
     let room_name = format!("{}_{}", application, short_room_name);
-    println!("{}",&room_name);
+
     //we need to access the rooms list
     let rooms = client.rooms_mutex.read().unwrap(); 
     if rooms.contains_key(&room_name) { 
-        println!("the room exists");
+
         let room = rooms.get(&room_name).unwrap();
         //form and send the message
         let mut write_buf = vec![];
@@ -270,7 +270,9 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
             {
                 let mut change_master = false;
                 let mut new_master_id = 0;
-                println!("Client in room, leaving");
+                {
+                    println!("{}: {}: Client {} in room, leaving",Local::now().format("%Y-%m-%d %H:%M:%S"), client.application.read().unwrap().to_string(),client.id);
+                }
                 let room = room.as_ref().unwrap();
 
                 //may have to choose a new master
@@ -280,13 +282,10 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
                     let clients = room.clients.read().unwrap();
                     let master_client = room.master_client.read().unwrap();
                     if master_client.id == client.id {
-                        println!("Will change master");
                         //change the master
                         change_master = true;
                         
                     }
-
-                    println!("Client leaving current room {}",&room.name);
                             
                     for (_k,v) in clients.iter() {
                         if !send_to_client && v.id == client.id{
@@ -311,7 +310,9 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
                 if clients.len() == 0 {
                     let mut rooms = client.rooms_mutex.write().unwrap(); 
                     rooms.remove(&room.name);
-                    println!("Destroyed room {}",&room.name)
+                    {
+                        println!("{}: {}: Destroyed room {}",Local::now().format("%Y-%m-%d %H:%M:%S"), client.application.read().unwrap().to_string(), &room.name)
+                    }
                 }else if change_master{
 
                     for (_k,v) in clients.iter() {
@@ -321,7 +322,9 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
                         }
                     }
 
-                    println!("Changing master to {}",new_master_id);
+                    {
+                        println!("{}: Changing master to {}",client.application.read().unwrap().to_string(), new_master_id);
+                    }
                     for (_k,v) in clients.iter() {
                         send_client_master_message(&v, new_master_id);
                     }
@@ -332,9 +335,7 @@ fn client_leave_room(client: &Arc<Client>, send_to_client: bool){
                     
                 }
             }
-        } else{
-            println!("Client not in room");
-        }
+        } 
     }
     {
         let mut room = client.room.write().unwrap();
@@ -350,16 +351,12 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
     let application = client.application.read().unwrap().to_string();
     let extended_room_name = format!("{}_{}", application, short_room_name);
 
-
-    println!("Got room message {}",short_room_name);
-
    
     //if the client is in a room, leave it
     let mut leave_room = false;
     {
         let room = client.room.read().unwrap();  //must release this mutex before calling into a function that uses it
         if room.as_ref().is_some(){
-            println!("Leaving the current room ");
             leave_room = true;
         }
     }
@@ -368,12 +365,10 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
     }
 
     if short_room_name.trim() == "" || short_room_name == "-1" {
-        println!("Empty room, leaving");
         return;
     }
 
-    
-    
+
     //join room_name
     {
         {
@@ -387,13 +382,13 @@ fn read_join_message(stream: &mut TcpStream, client: &Arc<Client>){
                 });
                 
                 rooms.insert(String::from(&extended_room_name),r);
-                println!("New room {} created",&extended_room_name);
+                println!("{}: {}: New room {} created",Local::now().format("%Y-%m-%d %H:%M:%S"), application,&extended_room_name);
             }
             //the room is guaranteed to exist now, so this call can't fail
             let room_to_join = &rooms[&extended_room_name];
             let mut clients = room_to_join.clients.write().unwrap(); 
             clients.insert(client.id,client.clone());
-            println!("Client {} joined {}",client.id,&extended_room_name);
+            println!("{}: {}: Client {} joined {}",Local::now().format("%Y-%m-%d %H:%M:%S"), application, client.id,&extended_room_name);
             let mut room = client.room.write().unwrap(); 
             *room = Some(room_to_join.clone()); //we create an option and assign it back to the room
         }
@@ -458,7 +453,7 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
                     }
                     match v.sender.send(write_buf.clone()){
                         Ok(_) => (),
-                        Err(x) => println!("Error sending to client {}: {}",v.id,x)
+                        Err(x) => println!("{}: {}: Error sending to client {}: {}",Local::now().format("%Y-%m-%d %H:%M:%S"), v.application.read().unwrap().to_string(),v.id,x)
                     } //this sometimes fails. 
 
                 }
@@ -475,7 +470,7 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
                     }
                     match v.sender.send(write_buf.clone()){
                         Ok(_) => (),
-                        Err(x) => println!("Error sending to client {}: {}",v.id,x)
+                        Err(x) => println!("{}: {}: Error sending to client {}: {}",Local::now().format("%Y-%m-%d %H:%M:%S"),v.application.read().unwrap().to_string(),v.id,x)
                     } //this sometimes fails. 
 
                 }
@@ -499,7 +494,7 @@ fn send_group_message(sender: &Arc<Client>, message: &Vec<u8>, group: &String){
 
           match c.sender.send(write_buf.clone()) {
               Ok(_) => (),
-              Err(_) => println!("no client in group")
+              Err(_) => ()
           }
       }
     }
@@ -526,7 +521,6 @@ fn read_send_message(stream: &mut TcpStream, client: &Arc<Client>, message_type:
 fn read_group_message(stream: &mut TcpStream, client: &Arc<Client>){
     
     let group = read_short_string(stream);
-    println!("Got group message {}",&group);
     let id_bytes = read_vec(stream);
     let num = id_bytes.len();
     
@@ -613,7 +607,7 @@ fn client_write_thread(mut stream: TcpStream, rx: Receiver<Vec<u8>> ) {
 fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<HashMap<u32,Arc<Client>>>>, rooms_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>){
     
     stream.set_nodelay(true).unwrap();
-    println!("Accepted new connection");
+    println!("{}: Accepted new connection, assigned client id {}",Local::now().format("%Y-%m-%d %H:%M:%S"),client_id);
     
     let (tx, rx) = mpsc::sync_channel(10000);
     //create a new client structure and add it to the list of clients
@@ -658,7 +652,7 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<Ha
         Ok(_)=>(),
         Err(_)=>()
     }
-    println!("Client {} left",client_id);
+    println!("{}: {}: Client {} left",Local::now().format("%Y-%m-%d %H:%M:%S"),client.application.read().unwrap().to_string(),client_id);
     //now we can kill the client.  
     {
         //make sure we remove the client from all rooms
@@ -670,7 +664,7 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<Ha
 }
 
 fn tcp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, room_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>){
-    println!("Started TCP Listener");
+    println!("{}: Started TCP Listener",Local::now().format("%Y-%m-%d %H:%M:%S"));
     let listener = TcpListener::bind("0.0.0.0:80").expect("could not bind port");
 
     let mut next_client_id = 0;
@@ -681,12 +675,13 @@ fn tcp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, room_mutex: 
         thread::spawn(move || {handle_client(stream.unwrap(), next_client_id, client_mutex, room_mutex)});
         next_client_id+=1;
     }
+    println!("{}: Ended TCP Listener",Local::now().format("%Y-%m-%d %H:%M:%S"));
 }
 
 fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>){
     let mut buf = [0u8;1024];
     let s = UdpSocket::bind("0.0.0.0:80").unwrap();
-    println!("UDP Thread Started");
+    println!("{}: UDP Thread Started",Local::now().format("%Y-%m-%d %H:%M:%S"));
     loop {
         let res = s.recv_from(&mut buf);
         match res {
@@ -806,14 +801,16 @@ fn udp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, _room_mutex:
         }
     
     }
+
+    println!("{}: UDP Thread Ended",Local::now().format("%Y-%m-%d %H:%M:%S"));
     
 
     
 }
 
 fn main() {
-    println!("VelNet Server Starting");
-
+    println!("{}: VelNet Server Starting",Local::now().format("%Y-%m-%d %H:%M:%S"));
+    
     let clients: HashMap<u32, Arc<Client>> = HashMap::new();
     let rooms: HashMap<String, Arc<Room>> = HashMap::new();
     let client_mutex = Arc::new(RwLock::new(clients));
@@ -826,5 +823,5 @@ fn main() {
     //start the TCP thread
     tcp_listen(client_mutex, room_mutex);
     udp_handle.join().unwrap();
-    println!("VelNet Ended");
+    println!("{}: VelNet Ended", Local::now().format("%Y-%m-%d %H:%M:%S"));
 }
