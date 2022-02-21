@@ -11,6 +11,7 @@ use std::sync::mpsc::{SyncSender,Receiver};
 use chrono::Local;
 use std::fs;
 use std::fmt;
+use std::time;
 use serde::{Serialize, Deserialize};
 enum ToClientTCPMessageType {
     LoggedIn = 0, 
@@ -568,7 +569,7 @@ fn client_read_thread(mut stream: TcpStream, mut client: Arc<Client>) {
     let mut read_buf:[u8;1] = [0; 1];
     //messages come through as a 1 byte type identifier, that can be one of 0 (login) 1 (get rooms), 2 (join/leave room) 3 (send message to room), 4 (send message to room including me), 5 (send message to group), 6 (establish group)
     loop {
-
+        
         //read exactly 1 byte
         stream.read_exact(&mut read_buf).unwrap();
         //println!("Got a message {}",read_buf[0]);
@@ -617,6 +618,7 @@ fn client_write_thread(mut stream: TcpStream, rx: Receiver<Vec<u8>> ) {
 fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<HashMap<u32,Arc<Client>>>>, rooms_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>){
     
     stream.set_nodelay(true).unwrap();
+    stream.set_read_timeout(Some(time::Duration::new(10,0))).unwrap();
     println!("{}: Accepted new connection, assigned client id {}",Local::now().format("%Y-%m-%d %H:%M:%S"),client_id);
     
     let (tx, rx) = mpsc::sync_channel(10000);
