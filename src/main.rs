@@ -69,7 +69,8 @@ struct Room {
 #[derive(Serialize, Deserialize)]
 struct Config {
     port: u16,
-    tcp_timeout: u64
+    tcp_timeout: u64,
+    tcp_send_buffer: usize
 }
 
 
@@ -615,14 +616,14 @@ fn client_write_thread(mut stream: TcpStream, rx: Receiver<Vec<u8>> ) {
 }
 
 
-fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<HashMap<u32,Arc<Client>>>>, rooms_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>,tcp_timeout: u64){
+fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<HashMap<u32,Arc<Client>>>>, rooms_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>,tcp_timeout: u64,tcp_send_buffer:usize){
     
     stream.set_nodelay(true).unwrap();
     stream.set_read_timeout(Some(time::Duration::new(tcp_timeout,0))).unwrap();
     stream.set_write_timeout(Some(time::Duration::new(tcp_timeout,0))).unwrap();
     println!("{}: Accepted new connection, assigned client id {}",Local::now().format("%Y-%m-%d %H:%M:%S"),client_id);
     
-    let (tx, rx) = mpsc::sync_channel(10000); //todo: address this magic number
+    let (tx, rx) = mpsc::sync_channel(tcp_send_buffer); //the server is very fast.  However, if the clients throttle the sending, this buffer may overflow, and when it does, data is lost
     //create a new client structure and add it to the list of clients
     let client = Arc::new(Client{
         id: client_id,
@@ -676,7 +677,7 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<Ha
     
 }
 
-fn tcp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, room_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>,port:u16,tcp_timeout:u64){
+fn tcp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, room_mutex: Arc<RwLock<HashMap<String,Arc<Room>>>>,port:u16,tcp_timeout:u64,tcp_send_buffer:usize){
     println!("{}: Started TCP Listener",Local::now().format("%Y-%m-%d %H:%M:%S"));
     let listener = TcpListener::bind(format!("0.0.0.0:{}",port)).expect("could not bind port");
 
@@ -685,7 +686,7 @@ fn tcp_listen(client_mutex: Arc<RwLock<HashMap<u32, Arc<Client>>>>, room_mutex: 
     for stream in listener.incoming() {
         let client_mutex = Arc::clone(&client_mutex);
         let room_mutex = Arc::clone(&room_mutex);
-        thread::spawn(move || {handle_client(stream.unwrap(), next_client_id, client_mutex, room_mutex,tcp_timeout)});
+        thread::spawn(move || {handle_client(stream.unwrap(), next_client_id, client_mutex, room_mutex,tcp_timeout,tcp_send_buffer)});
         next_client_id+=1;
     }
     println!("{}: Ended TCP Listener",Local::now().format("%Y-%m-%d %H:%M:%S"));
@@ -839,7 +840,7 @@ fn main() {
     let udp_rooms = Arc::clone(&room_mutex);
     let udp_handle = thread::spawn(move ||{udp_listen(udp_clients, udp_rooms, config.port);});
     //start the TCP thread
-    tcp_listen(client_mutex, room_mutex,config.port,config.tcp_timeout);
+    tcp_listen(client_mutex, room_mutex,config.port,config.tcp_timeout,config.tcp_send_buffer);
     udp_handle.join().unwrap();
     println!("{}: VelNet Ended", Local::now().format("%Y-%m-%d %H:%M:%S"));
 }
