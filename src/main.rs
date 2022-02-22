@@ -620,6 +620,7 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<Ha
     
     stream.set_nodelay(true).unwrap();
     stream.set_read_timeout(Some(time::Duration::new(tcp_timeout,0))).unwrap();
+    stream.set_write_timeout(Some(time::Duration::new(tcp_timeout,0))).unwrap();
     println!("{}: Accepted new connection, assigned client id {}",Local::now().format("%Y-%m-%d %H:%M:%S"),client_id);
     
     let (tx, rx) = mpsc::sync_channel(10000);
