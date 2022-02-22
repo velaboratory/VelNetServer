@@ -10,7 +10,6 @@ use std::sync::mpsc;
 use std::sync::mpsc::{SyncSender,Receiver};
 use chrono::Local;
 use std::fs;
-use std::fmt;
 use std::time;
 use serde::{Serialize, Deserialize};
 enum ToClientTCPMessageType {
@@ -123,7 +122,7 @@ fn read_login_message(stream: &mut TcpStream, client: &Arc<Client>) {
     write_buf.push(ToClientTCPMessageType::LoggedIn as u8);
     write_buf.extend_from_slice(&(client.id).to_be_bytes()); //send the client the id
 
-    client.sender.send(write_buf).unwrap();
+    client.sender.try_send(write_buf).unwrap();
 }
 
 //this is in response to a request for rooms.
@@ -156,7 +155,7 @@ fn read_rooms_message(_stream: &mut TcpStream, client: &Arc<Client>){
     let message_len = message_bytes.len() as u32;
     write_buf.extend_from_slice(&(message_len).to_be_bytes());
     write_buf.extend_from_slice(message_bytes);
-    client.sender.send(write_buf).unwrap();
+    client.sender.try_send(write_buf).unwrap();
     
 }
 
@@ -194,7 +193,7 @@ fn read_roomdata_message(stream: &mut TcpStream, client: &Arc<Client>){
             write_buf.push(username_bytes.len() as u8);
             write_buf.extend_from_slice(&username_bytes);
         }
-        client.sender.send(write_buf).unwrap();
+        client.sender.try_send(write_buf).unwrap();
     }
 
 }
@@ -205,7 +204,7 @@ fn send_client_master_message(to: &Arc<Client>, master_id: u32){
   let mut write_buf = vec![];
   write_buf.push(ToClientTCPMessageType::MasterMessage as u8);
   write_buf.extend_from_slice(&(master_id).to_be_bytes()); //send everyone that the client id joined the room
-  let res = to.sender.send(write_buf);
+  let res = to.sender.try_send(write_buf);
   match res {
       Ok(_) => (),
       Err(_) => ()
@@ -220,7 +219,7 @@ fn send_client_join_message(to: &Arc<Client>, from: u32, room: &str){
     write_buf.extend_from_slice(&(from).to_be_bytes()); //send everyone that the client id joined the room
     write_buf.push(room.as_bytes().len() as u8); 
     write_buf.extend_from_slice(room.as_bytes());
-    let res = to.sender.send(write_buf);
+    let res = to.sender.try_send(write_buf);
     match res {
         Ok(_) => (),
         Err(_) => ()
@@ -237,7 +236,7 @@ fn send_you_joined_message(to: &Arc<Client>, in_room: Vec<u32>, room: &str){
     }
     write_buf.push(room.as_bytes().len() as u8); 
     write_buf.extend_from_slice(room.as_bytes());
-    let res = to.sender.send(write_buf);
+    let res = to.sender.try_send(write_buf);
     match res {
         Ok(_) => (),
         Err(_) => ()
@@ -249,7 +248,7 @@ fn send_you_left_message(to: &Arc<Client>, room: &str){
     write_buf.push(ToClientTCPMessageType::YouLeft as u8);
     write_buf.push(room.as_bytes().len() as u8); 
     write_buf.extend_from_slice(room.as_bytes());
-    let res = to.sender.send(write_buf);
+    let res = to.sender.try_send(write_buf);
     match res {
         Ok(_) => (),
         Err(_) => ()
@@ -261,7 +260,7 @@ fn send_client_left_message(to: &Arc<Client>, from: u32, room: &str){
     write_buf.extend_from_slice(&(from).to_be_bytes()); //send everyone that the client id left the room
     write_buf.push(room.as_bytes().len() as u8); 
     write_buf.extend_from_slice(room.as_bytes());
-    let res = to.sender.send(write_buf);
+    let res = to.sender.try_send(write_buf);
     match res {
         Ok(_) => (),
         Err(_) => ()
@@ -460,7 +459,7 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
                     if !include_sender && v.id == sender.id {
                         continue;
                     }
-                    match v.sender.send(write_buf.clone()){
+                    match v.sender.try_send(write_buf.clone()){
                         Ok(_) => (),
                         Err(x) => println!("{}: {}: Error sending to client {}: {}",Local::now().format("%Y-%m-%d %H:%M:%S"), v.application.read().unwrap().to_string(),v.id,x)
                     } //this sometimes fails. 
@@ -477,7 +476,7 @@ fn send_room_message(sender: &Arc<Client>, message: &Vec<u8>, include_sender: bo
                     if !include_sender && v.id == sender.id {
                         continue;
                     }
-                    match v.sender.send(write_buf.clone()){
+                    match v.sender.try_send(write_buf.clone()){
                         Ok(_) => (),
                         Err(x) => println!("{}: {}: Error sending to client {}: {}",Local::now().format("%Y-%m-%d %H:%M:%S"),v.application.read().unwrap().to_string(),v.id,x)
                     } //this sometimes fails. 
@@ -501,7 +500,7 @@ fn send_group_message(sender: &Arc<Client>, message: &Vec<u8>, group: &String){
       for c in group {
           //there may be a leftover when a client leaves...will fix itself
 
-          match c.sender.send(write_buf.clone()) {
+          match c.sender.try_send(write_buf.clone()) {
               Ok(_) => (),
               Err(_) => ()
           }
@@ -657,7 +656,7 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<Ha
         Err(_)=>()
     }
     
-    match client.sender.send(vec![0]){ //force send thread to exit
+    match client.sender.try_send(vec![0]){ //force send thread to exit
         Ok(_)=>(),
         Err(_)=>()
     }
