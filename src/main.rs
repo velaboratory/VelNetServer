@@ -623,7 +623,7 @@ fn handle_client(stream: TcpStream, client_id: u32, clients_mutex: Arc<RwLock<Ha
     stream.set_write_timeout(Some(time::Duration::new(tcp_timeout,0))).unwrap();
     println!("{}: Accepted new connection, assigned client id {}",Local::now().format("%Y-%m-%d %H:%M:%S"),client_id);
     
-    let (tx, rx) = mpsc::sync_channel(10000);
+    let (tx, rx) = mpsc::sync_channel(10000); //todo: address this magic number
     //create a new client structure and add it to the list of clients
     let client = Arc::new(Client{
         id: client_id,
