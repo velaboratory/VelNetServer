@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VelNet Control Panel</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.3/css/bulma.min.css">
+
+    <style>
+        .bottom-scroller {
+            height: 30em;
+            overflow: auto;
+            display: flex;
+            flex-direction: column-reverse;
+        }
+
+        .log-output .panel-block {
+            padding: .1em .75em;
+        }
+    </style>
+</head>
+
+<body>
+    <section class="section">
+        <div class="container">
+            <h1 class="title">
+                VelNet Control Panel
+            </h1>
+            <p class="subtitle">
+                Log output and utilites for <strong>VelNet</strong>
+            </p>
+        </div>
+
+    </section>
+
+    <section>
+        <div class="container">
+            <div class="block">
+            <button class="button" id="restart-button">Restart Server</button>
+            <button class="button" id="pull-button">Git Pull</button>
+            <button class="button" id="compile-button">Compile</button>
+            </div>
+            <div class="block">Uptime: {{uptime}}</div>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="container">
+            <nav class="panel">
+                <p class="panel-heading">
+                    Server Log
+                    <code>nohup.out</code>
+                </p>
+
+                <div class="content bottom-scroller">
+                    <code class="log-output">
+                        <div>
+                        {{#each log_output}}
+                            <div class="panel-block">
+                                {{this}}
+                            </div>
+                        {{/each}}
+                        </div>
+                    </code>
+                </div>
+
+            </nav>
+
+            <nav class="panel">
+                <p class="panel-heading">
+                    Server Restarts
+                    <code>restarts.log</code>
+                </p>
+
+                <div class="content bottom-scroller">
+                    <code class="log-output">
+                        <div>
+                        {{#each restarts_output}}
+                            <div class="panel-block">
+                                {{this}}
+                            </div>
+                        {{/each}}
+                        </div>
+                    </code>
+                </div>
+
+            </nav>
+        </div>
+
+    </section>
+
+    <script>
+        "use strict";
+        document.getElementById('restart-button').addEventListener('click', c=> {
+            fetch('/restart_server').then(r=> {
+                setTimeout(location.reload(), 1000);
+            });
+            
+        });
+        document.getElementById('pull-button').addEventListener('click', c=> {
+            fetch('/git_pull').then(r=> {
+                location.reload();
+            });
+            
+        });
+        document.getElementById('compile-button').addEventListener('click', c=> {
+            fetch('/compile').then(r=> {
+                location.reload();
+            });
+            
+        });
+    </script>
+</body>
+
+</html>
