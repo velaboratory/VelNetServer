@@ -31,7 +31,6 @@ fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
         .collect()
 }
 
-// Macro documentation can be found in the actix_web_codegen crate
 #[get("/")]
 async fn index(hb: web::Data<Handlebars<'_>>) -> HttpResponse {
 
@@ -47,11 +46,20 @@ async fn index(hb: web::Data<Handlebars<'_>>) -> HttpResponse {
         .output()
         .expect("failed to execute process");
 
+    let _onefetch = Command::new("sh")
+        .arg("onefetch_file.sh")
+        .output()
+        .expect("failed");
+
+    let onefetch = fs::read_to_string("onefetch.out").unwrap();
+
 
     let data = json!({
         "log_output": log_file,
         "restarts_output": restarts_log,
         "uptime": format!("{}", String::from_utf8_lossy(&uptime.stdout)),
+        //"onefetch": format!("{}", String::from_utf8_lossy(&onefetch.stdout))
+        "onefetch": onefetch
     });
     let body = hb.render("index", &data).unwrap();
 
@@ -65,8 +73,8 @@ async fn restart_server() -> HttpResponse {
     let _output = Command::new("sh")
         .arg("../run.sh")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        //.stdout(Stdio::null())
+        //.stderr(Stdio::null())
         .spawn();
 
     HttpResponse::Ok().body("DONE")
@@ -98,11 +106,15 @@ async fn compile() -> HttpResponse {
     let root = Path::new(&config.server_dir);
     let _new_dir = env::set_current_dir(&root);
 
+    print!("before");
+
     let output = Command::new("cargo")
         .arg("build")
         .arg("--release")
         .output()
         .expect("failed to execute process");
+
+    print!("after");
         
     let _new_dir = env::set_current_dir(orig_dir);
 
