@@ -136,11 +136,9 @@ async fn process_client(socket: TcpStream, udp_socket: Rc<RefCell<UdpSocket>>, c
         is_master: false
     }));
 
-    
 
-    {
-        println!("Spawned client handler = {}",my_id);
-    }
+    println!("Spawned client handler = {}",my_id);
+    
     {
         let temp_client = client.clone();
         let mut clients_temp = clients.borrow_mut();
@@ -160,8 +158,6 @@ async fn process_client(socket: TcpStream, udp_socket: Rc<RefCell<UdpSocket>>, c
         () = write_async => println!("write async ended"),
         () = write_async_udp => println!("write async udp ended")
     }
-    
-    
     
     {
         client_leave_room(client.clone(), false, rooms.clone());
@@ -248,8 +244,6 @@ async fn client_write_udp(client: Rc<RefCell<Client>>, socket: Rc<RefCell<UdpSoc
 
     loop {
         notify.notified().await; //there is something to write
-        println!("Notified udp");
-
 
         let ip;
         let port;
@@ -279,7 +273,7 @@ async fn client_write_udp(client: Rc<RefCell<Client>>, socket: Rc<RefCell<UdpSoc
 }
 
 async fn process_udp(socket: Rc<RefCell<UdpSocket>>,clients: Rc<RefCell<HashMap<u32, Rc<RefCell<Client>>>>>, rooms: Rc<RefCell<HashMap<String, Rc<RefCell<Room>>>>>){
-    println!("started udp");
+
     let mut buf = [0u8;1024];
     loop {
         let socket = socket.borrow();
@@ -370,8 +364,6 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>,clients: Rc<RefCell<HashMap<
                 let (group_name_bytes, message_bytes) = message_vec.split_at(group_name_size as usize);
                 let group_name = String::from_utf8(group_name_bytes.to_vec()).unwrap();
 
-                println!("Got a upd group message for {}",group_name);
-
                 let clients = clients.borrow();
                 if clients.contains_key(&client_id){
                     let client = clients.get(&client_id).unwrap().borrow();
@@ -399,7 +391,6 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>,clients: Rc<RefCell<HashMap<
 //this is in response to someone asking to login (this is where usernames and passwords would be processed, in theory)
 async fn read_login_message(mut stream: TcpStream, client: Rc<RefCell<Client>>) {
     //byte,shortstring,byte,shortstring
-    println!("Reading login message");
     
     let username = read_short_string(&mut stream).await;
     let application = read_short_string(&mut stream).await;
@@ -425,7 +416,6 @@ async fn read_login_message(mut stream: TcpStream, client: Rc<RefCell<Client>>) 
 
 async fn read_rooms_message(mut stream: TcpStream, client: Rc<RefCell<Client>>, rooms: Rc<RefCell<HashMap<String, Rc<RefCell<Room>>>>>){
 
-    println!("Reading rooms message");
     let mut write_buf = vec![];
     write_buf.push(ToClientTCPMessageType::RoomList as u8);
     //first we need to get the room names
@@ -461,7 +451,6 @@ async fn read_rooms_message(mut stream: TcpStream, client: Rc<RefCell<Client>>, 
 async fn read_join_message(mut stream: TcpStream, client: Rc<RefCell<Client>>, rooms: Rc<RefCell<HashMap<String, Rc<RefCell<Room>>>>>){
     //byte,shortstring
 
-    println!("Reading join message");
     let short_room_name = read_short_string(&mut stream).await;
     let extended_room_name;
     let mut leave_room = false;
@@ -598,7 +587,6 @@ async fn read_send_message(mut stream: TcpStream, client: Rc<RefCell<Client>>, r
 
 async fn read_group_message(mut stream: TcpStream, client: Rc<RefCell<Client>>, clients: Rc<RefCell<HashMap<u32, Rc<RefCell<Client>>>>>){
     
-    println!("Reading group message");
     let group = read_short_string(&mut stream).await;
     let id_bytes = read_vec(&mut stream).await;
     let num = id_bytes.len();
@@ -703,7 +691,6 @@ fn client_leave_room(client: Rc<RefCell<Client>>, send_to_client: bool, rooms: R
 }
 
 fn send_you_left_message(client_ref: &mut Client, room: &str){
-    println!("Sending ou left message {}", room);
     let mut write_buf = vec![];
     write_buf.push(ToClientTCPMessageType::YouLeft as u8);
     write_buf.push(room.as_bytes().len() as u8); 
@@ -713,7 +700,6 @@ fn send_you_left_message(client_ref: &mut Client, room: &str){
 }
     
 fn send_client_left_message(to: &Rc<RefCell<Client>>, from: u32, room: &str){
-    println!("Sending client left message {} {}",from,room);
     let mut write_buf = vec![];
     write_buf.push(ToClientTCPMessageType::PlayerLeft as u8);
     write_buf.extend_from_slice(&(from).to_be_bytes()); //send everyone that the client id left the room
@@ -725,7 +711,6 @@ fn send_client_left_message(to: &Rc<RefCell<Client>>, from: u32, room: &str){
 }
 
 fn send_client_join_message(to: &Rc<RefCell<Client>>, from: u32, room: &str){
-    println!("Sending client joined message {} {}",from,room);
     //2u8, person_id_u32, room_name_len_u8, room_name_bytes
     let mut write_buf = vec![];
     write_buf.push(ToClientTCPMessageType::PlayerJoined as u8);
@@ -740,7 +725,6 @@ fn send_client_join_message(to: &Rc<RefCell<Client>>, from: u32, room: &str){
 
 fn send_you_joined_message(client_ref: &mut Client, in_room: Vec<u32>, room: &str){
     //you_joined_u8, ids_len_u32, id_list_array_u32, room_name_len_u8, room_name_bytes
-    println!("Sending you joined message {}",room);
     let mut write_buf = vec![];
     write_buf.push(ToClientTCPMessageType::YouJoined as u8);
     write_buf.extend_from_slice(&(in_room.len() as u32).to_be_bytes());  
@@ -754,7 +738,6 @@ fn send_you_joined_message(client_ref: &mut Client, in_room: Vec<u32>, room: &st
 }
 
 fn send_client_master_message(client_ref: &mut Client, master_id: u32){
-    println!("Sending client master message {}",master_id);
     //2u8, person_id_u32, room_name_len_u8, room_name_bytes
     let mut write_buf = vec![];
     write_buf.push(ToClientTCPMessageType::MasterMessage as u8);
