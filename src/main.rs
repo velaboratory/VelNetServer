@@ -804,10 +804,16 @@ fn send_room_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, rooms: Rc<R
         if !include_sender && *_k == sender_ref.id {
             continue;
         }
-        
-        let mut temp_mut = v.borrow_mut();
-        temp_mut.message_queue.extend_from_slice(&write_buf);
-        temp_mut.notify.notify();
+
+
+        if *_k == sender_ref.id {
+            sender_ref.message_queue.extend(&write_buf);
+            sender_ref.notify.notify();
+        }else {
+            let mut temp_mut = v.borrow_mut();
+            temp_mut.message_queue.extend_from_slice(&write_buf);
+            temp_mut.notify.notify();
+        }
         
     }
     
