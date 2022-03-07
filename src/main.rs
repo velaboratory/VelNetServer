@@ -224,7 +224,7 @@ async fn client_write(client: Rc<RefCell<Client>>, mut socket: TcpStream, notify
     loop {
         
         notify.notified().await; //there is something to write
-        println!("Notified");
+        
         let mut to_write = vec![];
         {
             let client_ref = client.borrow();
@@ -297,7 +297,7 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>,clients: Rc<RefCell<HashMap<
             let client_id_bytes = [buf[1],buf[2],buf[3],buf[4]];
             let client_id = u32::from_be_bytes(client_id_bytes);
 
-           
+            
 
             if t == FromClientUDPMessageType::Connect as u8 { //1 byte, 0.  Nothing else.  This is just to establish the udp port, Echos back the same thing sent
                 //connect message, respond back
@@ -329,7 +329,7 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>,clients: Rc<RefCell<HashMap<
                                 let mut v_ref = v.borrow_mut();
                                 msg.extend_from_slice(&buf[0..packet_size]);
                                 v_ref.message_queue_udp.push(msg);
-                                v_ref.notify.notify();
+                                v_ref.notify_udp.notify();
                             }
                         }
                     }
@@ -350,12 +350,12 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>,clients: Rc<RefCell<HashMap<
                                 let mut v_ref = v.borrow_mut();
                                 msg.extend_from_slice(&buf[0..packet_size]);
                                 v_ref.message_queue_udp.push(msg);
-                                v_ref.notify.notify();
+                                v_ref.notify_udp.notify();
                             }else{
                                 let mut msg = vec![];
                                 msg.extend_from_slice(&buf[0..packet_size]);
                                 client.message_queue_udp.push(msg);
-                                client.notify.notify();
+                                client.notify_udp.notify();
                             }
                         }
                     }
@@ -370,6 +370,7 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>,clients: Rc<RefCell<HashMap<
                 let (group_name_bytes, message_bytes) = message_vec.split_at(group_name_size as usize);
                 let group_name = String::from_utf8(group_name_bytes.to_vec()).unwrap();
 
+                println!("Got a upd group message for {}",group_name);
 
                 let clients = clients.borrow();
                 if clients.contains_key(&client_id){
@@ -385,7 +386,7 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>,clients: Rc<RefCell<HashMap<
                         for v in clients.iter() {
                             let mut v_ref = v.borrow_mut();
                             v_ref.message_queue_udp.push(message_to_send.clone());
-                            v_ref.notify.notify();
+                            v_ref.notify_udp.notify();
                         }
                     }
                 }
@@ -597,6 +598,7 @@ async fn read_send_message(mut stream: TcpStream, client: Rc<RefCell<Client>>, r
 
 async fn read_group_message(mut stream: TcpStream, client: Rc<RefCell<Client>>, clients: Rc<RefCell<HashMap<u32, Rc<RefCell<Client>>>>>){
     
+    println!("Reading group message");
     let group = read_short_string(&mut stream).await;
     let id_bytes = read_vec(&mut stream).await;
     let num = id_bytes.len();
