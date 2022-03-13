@@ -121,6 +121,14 @@ async fn process_client(socket: TcpStream, udp_socket: Rc<RefCell<UdpSocket>>, c
      
     let client_notify = Rc::new(Notify::new());
     let client_notify_udp = Rc::new(Notify::new());
+
+    let ip;
+    
+    match socket.peer_addr() {
+        Ok(p)=>ip=p.ip(),
+        Err(e)=>{return;}
+    }
+
     let client = Rc::new(RefCell::new(Client{
         id: my_id,
         username: String::from(""),
@@ -128,7 +136,7 @@ async fn process_client(socket: TcpStream, udp_socket: Rc<RefCell<UdpSocket>>, c
         roomname: String::from(""),
         application: String::from(""),
         groups: HashMap::new(),
-        ip: socket.peer_addr().unwrap().ip(),
+        ip: ip,
         udp_port: 0 as u16,
         message_queue: vec![],
         message_queue_udp: vec![],
