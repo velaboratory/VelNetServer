@@ -18,6 +18,7 @@ use chrono::Local;
 use std::time;
 use serde::{Serialize, Deserialize};
 use std::error::Error;
+use std::ptr;
 enum ToClientTCPMessageType {
     LoggedIn = 0, 
     RoomList = 1,
@@ -393,23 +394,50 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>,clients: Rc<RefCell<HashMap<
                 let group_name = String::from_utf8(group_name_bytes.to_vec()).unwrap();
 
                 let clients = clients.borrow();
+
+                let mut message_to_send = vec![];
+                message_to_send.push(ToClientUDPMessageType::DataMessage as u8);
+                message_to_send.extend([buf[1],buf[2],buf[3],buf[4]]);
+                message_to_send.extend(message_bytes);
+                
+                let mut send_to_client = false;
                 if clients.contains_key(&client_id){
-                    let client = clients.get(&client_id).unwrap().borrow();
-                    if client.groups.contains_key(&group_name) {
-                        let clients = client.groups.get(&group_name).unwrap();
-                        //we need to form a new message without the group name 
-                        let mut message_to_send = vec![];
-                        message_to_send.push(ToClientUDPMessageType::DataMessage as u8);
-                        message_to_send.extend([buf[1],buf[2],buf[3],buf[4]]);
-                        message_to_send.extend(message_bytes);
-                        
-                        for v in clients.iter() {
-                            let mut v_ref = v.borrow_mut();
-                            v_ref.message_queue_udp.push(message_to_send.clone());
-                            v_ref.notify_udp.notify();
+                    {
+                        {
+                            let client = clients.get(&client_id).unwrap().borrow();
+                            if client.groups.contains_key(&group_name) {
+                                let clients = client.groups.get(&group_name).unwrap();
+                                //we need to form a new message without the group name 
+
+                                
+                                for v in clients.iter() {
+                                    let mut skip_client=false;
+                                    let v_ref;
+                                    {
+                                        v_ref = v.borrow();
+                                        if(v_ref.id == client.id){
+                                            skip_client=true;
+                                            send_to_client = true;
+                                        }
+                                    }
+                                    if !skip_client {
+                                        let mut v_ref = v.borrow_mut();
+                                        v_ref.message_queue_udp.push(message_to_send.clone());
+                                        v_ref.notify_udp.notify();
+                                    }
+                                }
+                            }
                         }
+                        if send_to_client {
+                            let mut client = clients.get(&client_id).unwrap().borrow_mut();
+                            client.message_queue_udp.push(message_to_send.clone());
+                            client.notify_udp.notify();
+                        }
+                        
                     }
                 }
+
+               
             }
         } 
         
@@ -830,21 +858,31 @@ fn send_room_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, rooms: Rc<R
 }
 fn send_group_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, group: &String){
     let mut write_buf = vec![];
-    let sender_ref = sender.borrow();
+    let mut sender_ref = sender.borrow_mut();
     write_buf.push(ToClientTCPMessageType::DataMessage as u8);
     write_buf.extend_from_slice(&sender_ref.id.to_be_bytes());
     write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
     write_buf.extend_from_slice(message);
 
     //get the list of client ids for this group
-    let groups = &sender_ref.groups;
-    if groups.contains_key(group) {
-      let group = groups.get(group).unwrap();
-      for c in group {
-        let mut temp_mut = c.borrow_mut();
-        temp_mut.message_queue.extend_from_slice(&write_buf);
-        temp_mut.notify.notify();
-      }
+    let mut send_to_client = false;
+    if sender_ref.groups.contains_key(group) {
+        let group = sender_ref.groups.get(group).unwrap();
+        for c in group {
+            if ptr::eq(sender.as_ref(),c.as_ref()){
+                send_to_client = true;
+            }
+            else{
+                let mut temp_mut = c.borrow_mut();
+                temp_mut.message_queue.extend_from_slice(&write_buf);
+                temp_mut.notify.notify();
+            }
+        }
+    }
+
+    if send_to_client {
+        sender_ref.message_queue.extend_from_slice(&write_buf);
+        sender_ref.notify.notify();
     }
 
 }
