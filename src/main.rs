@@ -412,9 +412,9 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>,clients: Rc<RefCell<HashMap<
                                 
                                 for v in clients.iter() {
                                     let mut skip_client=false;
-                                    let v_ref;
+                                    
                                     {
-                                        v_ref = v.borrow();
+                                        let v_ref = v.borrow();
                                         if(v_ref.id == client.id){
                                             skip_client=true;
                                             send_to_client = true;
