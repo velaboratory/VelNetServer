@@ -837,15 +837,8 @@ fn send_room_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, rooms: Rc<R
     let room_ref = rooms_ref[&sender_ref.roomname].borrow();
 
     for (_k,v) in room_ref.clients.iter(){
-        if !include_sender && *_k == sender_ref.id {
-            continue;
-        }
-
-
-        if *_k == sender_ref.id {
-            sender_ref.message_queue.extend(&write_buf);
-            sender_ref.notify.notify();
-        }else {
+        
+        if *_k != sender_ref.id {
             let mut temp_mut = v.borrow_mut();
             temp_mut.message_queue.extend_from_slice(&write_buf);
             temp_mut.notify.notify();
