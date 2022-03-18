@@ -78,8 +78,7 @@ struct Room {
 #[derive(Serialize, Deserialize)]
 struct Config {
     port: u16,
-    tcp_timeout: u64,
-    tcp_send_buffer: usize
+    tcp_timeout: u64
 }
 
 
