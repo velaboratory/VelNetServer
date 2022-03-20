@@ -111,7 +111,10 @@ async fn process_client(socket: TcpStream, udp_socket: Rc<RefCell<UdpSocket>>, c
     
     println!("started tcp");
 
-    socket.set_nodelay(true).unwrap();
+    match socket.set_nodelay(true) {
+        Ok(_)=>{},
+        Err(_)=>{eprintln!("could not set no delay"); return;}
+    }
     //socket.set_read_timeout(Some(time::Duration::new(config.tcp_timeout,0))).unwrap();
     //socket.set_write_timeout(Some(time::Duration::new(config.tcp_timeout,0))).unwrap();
     
@@ -130,7 +133,7 @@ async fn process_client(socket: TcpStream, udp_socket: Rc<RefCell<UdpSocket>>, c
     
     match socket.peer_addr() {
         Ok(p)=>ip=p.ip(),
-        Err(e)=>{return;}
+        Err(_)=>{return;}
     }
 
     let client = Rc::new(RefCell::new(Client{
@@ -443,7 +446,14 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>,clients: Rc<RefCell<HashMap<
                 let group_name_size = buf[5];
                 let message_vec = buf[6..packet_size].to_vec();
                 let (group_name_bytes, message_bytes) = message_vec.split_at(group_name_size as usize);
-                let group_name = String::from_utf8(group_name_bytes.to_vec()).unwrap();
+
+                let res = String::from_utf8(group_name_bytes.to_vec());
+                match res {
+                    Ok(_)=>{},
+                    Err(_)=>{eprintln!("Could not convert group name"); return;}
+                }
+
+                let group_name = res.unwrap();
 
                 let clients = clients.borrow();
 
@@ -759,7 +769,7 @@ fn client_leave_room(client: Rc<RefCell<Client>>, send_to_client: bool, rooms: R
         
         let mut destroy_room = false;
         {
-            let mut rooms_ref = rooms.borrow_mut();
+            let rooms_ref = rooms.borrow_mut();
             let mut room_ref = rooms_ref.get(&roomname).unwrap().borrow_mut();
 
             for (_k,v) in room_ref.clients.iter() {
@@ -948,13 +958,14 @@ async fn _read_string(stream: &mut TcpStream,duration: u64) -> Result<String,Box
     let size = read_u32(stream,duration).await?;
     let mut string_bytes = vec![0;size as usize];
     read_timeout(stream, &mut string_bytes, duration).await?;
-    return Ok(String::from_utf8(string_bytes).unwrap());
+    return Ok(String::from_utf8(string_bytes)?);
+    
 }
 async fn read_short_string(stream: &mut TcpStream,duration: u64) -> Result<String,Box<dyn Error>> {
     let size = read_u8(stream,duration).await?;
     let mut string_bytes = vec![0;size as usize];
     read_timeout(stream, &mut string_bytes, duration).await?;
-    return Ok(String::from_utf8(string_bytes).unwrap());
+    return Ok(String::from_utf8(string_bytes)?);
 }
 
 async fn read_vec(stream: &mut TcpStream,duration: u64) -> Result<Vec<u8>,Box<dyn Error>> {
