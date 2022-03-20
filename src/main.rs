@@ -187,26 +187,36 @@ async fn process_client(socket: TcpStream, udp_socket: Rc<RefCell<UdpSocket>>, c
 
 async fn read_timeout(mut socket: &TcpStream, buf: &mut [u8], duration: u64) -> Result<usize,Box<dyn Error>> {
 
-    match future::timeout(Duration::from_millis(duration), socket.read(buf)).await {
-        Ok(r) => {
-            match r {
+    //this is a read exact function.  The buffer passed should be the exact size wanted
 
-                Ok(n) if n == 0 => {
-                    
-                    return Err(format!("{}", "no bytes read"))?
+    let num_to_read = buf.len();
+    
+    let mut num_read = 0;
 
-                },
-                Ok(n) => {
-                    return Ok(n);
-                }, 
-                Err(e) => {return Err(format!("{}", e.to_string()))?}
-            }
+    while num_read < num_to_read {
+        match future::timeout(Duration::from_millis(duration), socket.read(&mut buf[num_read..])).await {
+            Ok(r) => {
+                match r {
 
-        },
+                    Ok(n) if n == 0 => {
+                        
+                        return Err(format!("{}", "no bytes read"))?
 
-        Err(e) => {return Err(format!("{}", e.to_string()))?}
+                    },
+                    Ok(n) => {
+                        num_read += n;
+                    }, 
+                    Err(e) => {return Err(format!("{}", e.to_string()))?}
+                }
 
+            },
+
+            Err(e) => {return Err(format!("{}", e.to_string()))?}
+
+        }
     }
+
+    return Ok(num_read);
 
 }
 
