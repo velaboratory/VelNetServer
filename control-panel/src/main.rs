@@ -14,21 +14,26 @@ use std::path::Path;
 use serde::{Serialize, Deserialize};
 use std::process::{Command, Stdio};
 use std::env;
+use std::cmp;
 
 #[derive(Serialize, Deserialize)]
 struct Config {
     port: u16,
     log_file: String,
-    server_dir: String
+    server_dir: String,
 }
 
 
 fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
-    let file = File::open(filename).expect("no such file");
-    let buf = BufReader::new(file);
-    buf.lines()
-        .map(|l| l.expect("Could not parse line"))
-        .collect()
+    if filename.as_ref().is_file() {
+        let file = File::open(filename).expect("no such file");
+        let buf = BufReader::new(file);
+        buf.lines()
+            .map(|l| l.expect("Could not parse line"))
+            .collect()
+    } else {
+        vec![]
+    }
 }
 
 #[get("/")]
@@ -40,6 +45,7 @@ async fn index(hb: web::Data<Handlebars<'_>>) -> HttpResponse {
 
     //read the log file
     let log_file = lines_from_file(config.log_file);
+
     let restarts_log = lines_from_file("../restarts.log");
 
     let uptime = Command::new("uptime")
@@ -53,10 +59,9 @@ async fn index(hb: web::Data<Handlebars<'_>>) -> HttpResponse {
 
     let onefetch = fs::read_to_string("onefetch.out").unwrap();
 
-
     let data = json!({
-        "log_output": log_file,
-        "restarts_output": restarts_log,
+        "log_output": &log_file[(cmp::max((log_file.len() as i64) - 1000, 0) as usize)..],
+        "restarts_output": &restarts_log[(cmp::max((restarts_log.len() as i64) - 1000, 0) as usize)..],
         "uptime": format!("{}", String::from_utf8_lossy(&uptime.stdout)),
         //"onefetch": format!("{}", String::from_utf8_lossy(&onefetch.stdout))
         "onefetch": onefetch
@@ -81,10 +86,8 @@ async fn restart_server() -> HttpResponse {
 }
 
 
-
 #[get("/git_pull")]
 async fn git_pull() -> HttpResponse {
-
     let output = Command::new("sh")
         .arg("git_pull.sh")
         .output()
@@ -115,17 +118,15 @@ async fn compile() -> HttpResponse {
         .expect("failed to execute process");
 
     print!("after");
-        
+
     let _new_dir = env::set_current_dir(orig_dir);
 
     HttpResponse::Ok().body(output.stdout)
 }
 
 
-
 #[actix_web::main]
 async fn main() -> io::Result<()> {
-
     let mut handlebars = Handlebars::new();
     handlebars.set_dev_mode(true);
     handlebars.register_templates_directory(".hbs", "./static/templates").unwrap();
@@ -140,9 +141,9 @@ async fn main() -> io::Result<()> {
             .service(git_pull)
             .service(compile)
     })
-    .bind(("127.0.0.1", 8080))?
-    .run()
-    .await
+        .bind(("127.0.0.1", 8080))?
+        .run()
+        .await
 }
 
 // Custom error handlers, to return HTML responses when an error occurs.
