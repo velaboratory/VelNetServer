@@ -85,8 +85,8 @@ async fn restart_server() -> HttpResponse {
 #[get("/git_pull")]
 async fn git_pull() -> HttpResponse {
 
-    let output = Command::new("git")
-        .arg("pull")
+    let output = Command::new("sh")
+        .arg("git_pull.sh")
         .output()
         .expect("failed to execute process");
 

@@ -1,5 +1,5 @@
 {
     "port": 8080,
-    "log_file": "/home/ntsfranz/Documents/VelNetServerRust/nohup.out",
-    "server_dir": "/home/ntsfranz/Documents/VelNetServerRust/"
+    "log_file": "/home/ubuntu/VelNetServerRust2/nohup.out",
+    "server_dir": "/home/ubuntu/VelNetServerRust2/"
 }
