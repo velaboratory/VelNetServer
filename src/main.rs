@@ -819,6 +819,8 @@ fn client_leave_room(client: Rc<RefCell<Client>>, send_to_client: bool, rooms: R
                 send_client_master_message(&mut *c, new_master_id);
             }
             room_ref.master_client = room_ref.clients.get(&new_master_id).unwrap().clone();
+            room_ref.master_client.borrow_mut().is_master = true;
+            client_ref.is_master = false;
         }
     }
     let mut client_ref = client.borrow_mut();
