@@ -1,1 +1,3 @@
-sudo -u ubuntu bash -c "onefetch > onefetch.out"
+#!/bin/bash
+
+sudo -u "$1" bash -c "~/.cargo/bin/onefetch > onefetch.out"

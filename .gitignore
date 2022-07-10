@@ -6,3 +6,5 @@ main.pdb
 .idea/
 restarts.log
 nohup.out
+server.log
+control_panel.log

@@ -1,5 +1,8 @@
 {
-    "port": 8080,
-    "log_file": "/home/ubuntu/VelNetServerRust2/nohup.out",
-    "server_dir": "/home/ubuntu/VelNetServerRust2/"
+  "port": 8080,
+  "user": "ntsfranz",
+  "server_log_file": "../server.log",
+  "control_panel_log_file": "control_panel.log",
+  "server_dir": "../",
+  "handlebars_dev_mode": true
 }
