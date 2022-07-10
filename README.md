@@ -14,21 +14,10 @@ The server supports both TCP and UDP transports.
 
 1. Get a linoox server (also runs fine on windows & osx, but the instructions below are for linux)
 2. Clone this repo
-3. Edit config.txt to an open port on your firewall
-4. Install rust through cargo: e.g. `sudo apt install cargo`
-5. Build: `cargo build --release`
-6. Run: `sudo ./target/release/VelNetServerRust`
-7. Or run in the background so that it doesn't quit when you leave ssh: `nohup sudo ./target/release/VelNetServerRust`. You'll have to install `nohup` with apt.
-
-
-## Running with control panel server
-
-You don't need to do both of these steps. The control panel runs the other server.
-
-1. Get a linoox server
-2. Clone this repo
-3. Install rust: `sudo apt install cargo`
-3. Switch to control panel: `cd control-panel`
-5. Build: `cargo build --release`
-6. `touch ../nohup.out ../restarts.log`
-6. Run the web server in the background so that it doesn't quit when you leave ssh: `nohup sudo ./target/release/control-panel`. You'll have to install `nohup` with apt.
+3. Edit config.json to an open port on your firewall
+4. Modify the `user` field in `control-panel/config.json` to be your username.
+5. Install rust through using rustup: https://rustup.rs/
+6. Install: `sudo ./install.sh`
+7. Run server: `sudo systemctl start velnet`
+8. Run control panel: `sudo systemctl start velnet-control-panel`
+9. Install onefetch: `cargo install onefetch`
