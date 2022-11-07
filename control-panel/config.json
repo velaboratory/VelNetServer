@@ -1,7 +1,7 @@
 {
   "port": 8080,
   "user": "ntsfranz",
-  "server_log_file": "../server.log",
+  "server_log_file": "../logs/server.log",
   "control_panel_log_file": "control_panel.log",
   "server_dir": "../",
   "handlebars_dev_mode": true

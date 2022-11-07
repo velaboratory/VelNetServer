@@ -49,24 +49,24 @@ async fn index(hb: web::Data<Handlebars<'_>>) -> HttpResponse {
 
     // let restarts_log = lines_from_file(config.restarts_log_file);
 
-    let uptime = Command::new("uptime")
+    let uptime = Command::new("tuptime")
         .output()
         .expect("failed to execute process");
 
-    let _onefetch = Command::new("sh")
-        .arg("onefetch_file.sh")
-        .arg(config.user)
-        .output()
-        .expect("failed");
+    // let _onefetch = Command::new("sh")
+    //     .arg("onefetch_file.sh")
+    //     .arg(config.user)
+    //     .output()
+    //     .expect("failed");
 
-    let onefetch = fs::read_to_string("onefetch.out").unwrap();
+    // let onefetch = fs::read_to_string("onefetch.out").unwrap();
 
     let data = json!({
         "log_output": &log_file[(cmp::max((log_file.len() as i64) - 1000, 0) as usize)..],
         // "restarts_output": &restarts_log[(cmp::max((restarts_log.len() as i64) - 1000, 0) as usize)..],
         "uptime": format!("{}", String::from_utf8_lossy(&uptime.stdout)),
         //"onefetch": format!("{}", String::from_utf8_lossy(&onefetch.stdout))
-        "onefetch": onefetch.trim_end()
+        "onefetch": ""
     });
     let body = hb.render("index", &data).unwrap();
 

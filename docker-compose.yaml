@@ -1,0 +1,19 @@
+version: "3.9"
+services:
+  control-panel:
+    build: control-panel
+    ports:
+      - "8080:8080"
+    volumes:
+      - logs-volume:/logs
+  server:
+    build: server
+    ports:
+      - "5000:5000/tcp"
+      - "5000:5000/udp"
+    volumes:
+      - logs-volume:/logs
+
+
+volumes:
+  logs-volume:
