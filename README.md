@@ -15,13 +15,13 @@ The server supports both TCP and UDP transports.
 ### Option 1: Pull from Docker Hub
 
 ```sh
-docker run -p 5000:5000 velaboratory/velnet
+docker run -p 5000:5000 -p 5000:5000/udp velaboratory/velnet
 ```
 
 or 
 
 ```sh
-docker run -p 5050:5000 --name velnet velaboratory/velnet
+docker run -p 5050:5000 -p 5050:5000/udp --name velnet velaboratory/velnet
 ```
 To run on a different port and change the name of the container.
 
