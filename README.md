@@ -64,8 +64,13 @@ If necessary, log into the `velaboratory` account on Docker Hub with `docker log
 
 ```sh
 cd server
-docker build -t velaboratory/velnet .
-docker push velaboratory/velnet
-docker tag velaboratory/velnet velaboratory/velnet:0.3.0
-docker push velaboratory/velnet:0.3.0
+docker buildx build --platform linux/amd64,linux/arm64 -t velaboratory/velnet:latest -t velaboratory/velnet:0.3.0 --push .
+```
+
+Make sure to change 0.3.0 to the correct version number.
+
+if `buildx` is not set up, use this command to create and switch to the cross-platform builder:
+
+```sh
+docker buildx create --name crossbuilder --bootstrap --use
 ```
