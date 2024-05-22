@@ -54,3 +54,18 @@ This builds the images from the local data in the folder, and doesn't pull anyth
 8. Run control panel: `sudo systemctl start velnet-control-panel`
 9. Install tuptime: `cargo install tuptime`
 9. Install onefetch: `cargo install onefetch`
+
+
+## Developing
+
+### To upload to Docker Hub (internal use only)
+
+If necessary, log into the `velaboratory` account on Docker Hub with `docker login`.
+
+```sh
+cd server
+docker build -t velaboratory/velnet .
+docker push velaboratory/velnet
+docker tag velaboratory/velnet velaboratory/velnet:0.3.0
+docker push velaboratory/velnet:0.3.0
+```
