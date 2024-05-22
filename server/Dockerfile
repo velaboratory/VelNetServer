@@ -1,4 +1,4 @@
-FROM rust:1.64 as build
+FROM rust:1.78 as build
 
 # 1. Create a new empty shell project
 RUN USER=root cargo new --bin velnet_server
@@ -19,7 +19,7 @@ RUN rm ./target/release/deps/velnet_server*
 RUN cargo build --release
 
 # our final base
-FROM debian:buster-slim
+FROM debian:trixie-slim
 
 # copy the build artifact from the build stage
 COPY --from=build /velnet_server/target/release/velnet_server .

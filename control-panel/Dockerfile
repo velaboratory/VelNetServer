@@ -1,4 +1,4 @@
-FROM rust:1.64 as build
+FROM rust:1.78 as build
 
 # 1. Create a new empty shell project
 RUN USER=root cargo new --bin velnet_control_panel
@@ -19,7 +19,7 @@ RUN rm ./target/release/deps/velnet_control_panel*
 RUN cargo build --release
 
 # our final base
-FROM rust:1.64-slim
+FROM rust:1.78-slim
 WORKDIR /velnet_control_panel
 
 # RUN apt-get update && apt-get install -y extra-runtime-dependencies && rm -rf /var/lib/apt/lists/*

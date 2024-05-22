@@ -11,8 +11,8 @@ use futures::pin_mut;
 use futures::future::FutureExt;
 use async_std::net::{IpAddr, SocketAddr};
 use std::collections::HashMap;
-use std::rc::{Rc};
-use std::cell::{RefCell};
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::fs;
 use chrono::Local;
 use std::time::Duration;
@@ -22,6 +22,9 @@ use std::fs::OpenOptions;
 use std::io::BufReader;
 use std::ptr;
 use simplelog::*;
+
+// This should only be incremented for breaking changes.
+const SERVER_VERSION: u32 = 2;
 
 enum ToClientTCPMessageType {
     LoggedIn = 0,
@@ -46,6 +49,7 @@ enum FromClientTCPMessageType {
     SendMessageOthersBuffered = 7,
     SendMessageAllBuffered = 8,
     GetRoomData = 9,
+    SendMessageSelf = 10,
 }
 
 enum ToClientUDPMessageType {
@@ -292,7 +296,8 @@ async fn client_read(client: Rc<RefCell<Client>>, mut socket: TcpStream, clients
                     t == FromClientTCPMessageType::SendMessageAllUnbuffered as u8 ||
                     t == FromClientTCPMessageType::SendMessageGroupUnbuffered as u8 ||
                     t == FromClientTCPMessageType::SendMessageOthersBuffered as u8 ||
-                    t == FromClientTCPMessageType::SendMessageAllBuffered as u8 { //others,all,group[t:u8][message.length():i32][message:u8array]
+                    t == FromClientTCPMessageType::SendMessageAllBuffered as u8 ||
+                    t == FromClientTCPMessageType::SendMessageSelf as u8 { //others,all,group[t:u8][message.length():i32][message:u8array]
                     match read_send_message(socket.clone(), client.clone(), rooms.clone(), t, duration).await {
                         Ok(_) => (),
                         Err(_) => {
@@ -558,7 +563,10 @@ async fn read_login_message(mut stream: TcpStream, client: Rc<RefCell<Client>>, 
         let mut client = client.borrow_mut();
         let mut write_buf = vec![];
         write_buf.push(ToClientTCPMessageType::LoggedIn as u8);
-        write_buf.extend_from_slice(&(client.id).to_be_bytes()); //send the client the id
+        // send the client the id
+        write_buf.extend_from_slice(&(client.id).to_be_bytes()); 
+        // send the server version
+        write_buf.extend_from_slice(&(SERVER_VERSION).to_be_bytes());
         client.message_queue.extend(write_buf);
         client.notify.notify();
     }
@@ -726,6 +734,8 @@ async fn read_send_message(mut stream: TcpStream, client: Rc<RefCell<Client>>, r
         send_room_message(client, &to_send, rooms.clone(), false, true);
     } else if message_type == FromClientTCPMessageType::SendMessageAllBuffered as u8 { //ordered
         send_room_message(client, &to_send, rooms.clone(), true, true);
+    } else if message_type == FromClientTCPMessageType::SendMessageSelf as u8 {
+        send_self_message(client, &to_send);
     } else if message_type == FromClientTCPMessageType::SendMessageGroupUnbuffered as u8 {
         let group = read_short_string(&mut stream, duration).await?;
         send_group_message(client, &to_send, &group);
@@ -926,6 +936,18 @@ fn send_room_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, rooms: Rc<R
             temp_mut.notify.notify();
         }
     }
+}
+
+fn send_self_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>) {
+    let mut write_buf = vec![];
+    let mut sender_ref = sender.borrow_mut();
+    write_buf.push(ToClientTCPMessageType::DataMessage as u8);
+    write_buf.extend_from_slice(&sender_ref.id.to_be_bytes());
+    write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
+    write_buf.extend_from_slice(message);
+
+    sender_ref.message_queue.extend_from_slice(&write_buf);
+    sender_ref.notify.notify();    
 }
 
 fn send_group_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, group: &String) {
