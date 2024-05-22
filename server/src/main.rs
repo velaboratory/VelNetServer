@@ -11,6 +11,7 @@ use futures::pin_mut;
 use futures::future::FutureExt;
 use async_std::net::{IpAddr, SocketAddr};
 use std::collections::HashMap;
+use std::path::Path;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::fs;
@@ -98,6 +99,8 @@ struct VelNetConfig {
 async fn main() {
     let config = read_config_file().unwrap();
 
+    // create the folder if it doesn't exist
+    fs::create_dir_all(Path::new(&config.log_file).parent().unwrap()).unwrap();
     let f = OpenOptions::new()
         .write(true)
         .append(true)
