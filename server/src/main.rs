@@ -318,7 +318,7 @@ async fn client_read(client: Rc<RefCell<Client>>, mut socket: TcpStream, clients
                     };
                 } else {
                     //die...not correct protocol
-                    log::error!("Incorrect protocol, killing");
+                    log::error!("Incorrect protocol, killing. Received a FromClientTCPMessageType of type {}", t);
                     return;
                 }
             }
@@ -432,7 +432,7 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>, clients: Rc<RefCell<HashMap
                 if clients.contains_key(&client_id) {
                     let mut client = clients.get(&client_id).unwrap().borrow_mut();
                     client.udp_port = addr.port(); //set the udp port to send data to
-                    client.message_queue_udp.push(vec![0]);
+                    client.message_queue_udp.push(vec![ToClientUDPMessageType::Connected as u8]);
                     client.notify_udp.notify();
                 }
             } else if t == FromClientUDPMessageType::SendMessageOthersUnbuffered as u8 { //[3:u8][from:i32][contents:u8array] note that it must fit into the packet of 1024 bytes

@@ -18,11 +18,12 @@ The server supports both TCP and UDP transports.
 docker run -p 5000:5000 -p 5000:5000/udp velaboratory/velnet
 ```
 
-or 
+or
 
 ```sh
-docker run -p 5050:5000 -p 5050:5000/udp --name velnet velaboratory/velnet
+docker run -p 5002:5000 -p 5002:5000/udp --name velnet-2 velaboratory/velnet
 ```
+
 To run on a different port and change the name of the container.
 
 ### Option 2: Use docker-compose
@@ -33,28 +34,40 @@ Runs both the control panel and the server.
 docker compose up -d
 ```
 
-to run, and 
+to run, and
 
 ```sh
 docker compose stop
 ```
+
 to stop.
 
 This builds the images from the local data in the folder, and doesn't pull anything from Docker Hub.
 
 ### Option 3: Run Rust natively
 
+1. Clone this repo
+2. Edit `config.json` to an open port on your firewall
+3. Install Rust: <https://rustup.rs/>
+4. `cd server`
+5. Debug:
+   1. `cargo run`
+6. Build:
+   1. `cargo build --release`
+   2. `./target/release/velnet_server`
+
+### Option 4: Run Rust natively (with control panel and install script)
+
 1. Get a linoox server (also runs fine on Windows & OSX, but the instructions below are for Linux)
 2. Clone this repo
 3. Edit `config.json` to an open port on your firewall
 4. Modify the `user` field in `control-panel/config.json` to be your username.
-5. Install rust through using rustup: https://rustup.rs/
+5. Install rust through using rustup: <https://rustup.rs/>
 6. Install: `sudo ./install.sh`
 7. Run server: `sudo systemctl start velnet`
 8. Run control panel: `sudo systemctl start velnet-control-panel`
 9. Install tuptime: `cargo install tuptime`
-9. Install onefetch: `cargo install onefetch`
-
+10. Install onefetch: `cargo install onefetch`
 
 ## Developing
 
