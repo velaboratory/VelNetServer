@@ -333,11 +333,11 @@ async fn client_read(client: Rc<RefCell<Client>>, mut socket: TcpStream, clients
 
 
 async fn write_timeout(mut socket: &TcpStream, buf: &[u8], duration: u64) -> Result<usize, Box<dyn Error>> {
-    return match future::timeout(Duration::from_millis(duration), socket.write(buf)).await {
+    return match future::timeout(Duration::from_millis(duration), socket.write_all(buf)).await {
         Ok(r) => {
             match r {
-                Ok(n) => {
-                    Ok(n)
+                Ok(()) => {
+                    Ok(buf.len())
                 }
                 Err(e) => { Err(format!("{}", e.to_string()))? }
             }
