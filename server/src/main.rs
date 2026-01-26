@@ -24,7 +24,7 @@ use std::io::BufReader;
 use std::ptr;
 use simplelog::*;
 
-// This should only be incremented for breaking changes.
+// Reverted to 2 as we no longer change the login handshake
 const SERVER_VERSION: u32 = 2;
 
 enum ToClientTCPMessageType {
@@ -73,7 +73,7 @@ struct Client {
     application: String,
     groups: HashMap<String, Vec<Rc<RefCell<Client>>>>,
     ip: IpAddr,
-    udp_port: u16,
+    udp_port: u16, // 0 = TCP Only / UDP Not Established yet
     message_queue: Vec<u8>,
     message_queue_udp: Vec<Vec<u8>>,
     notify: Rc<Notify>,
@@ -116,7 +116,7 @@ async fn main() {
     ).unwrap();
 
     log::info!("----------------------");
-    log::info!("VelNet Server Starting");
+    log::info!("VelNet Server Starting v{}", SERVER_VERSION);
 
     // read the config file
     let foo = fs::read_to_string("config.json").unwrap();
@@ -187,7 +187,7 @@ async fn process_client(socket: TcpStream, udp_socket: Rc<RefCell<UdpSocket>>, c
         application: String::from(""),
         groups: HashMap::new(),
         ip: ip,
-        udp_port: 0 as u16,
+        udp_port: 0 as u16, // Defaults to 0 (TCP Only) until UDP Connect is received
         message_queue: vec![],
         message_queue_udp: vec![],
         notify: client_notify.clone(),
@@ -394,11 +394,14 @@ async fn client_write_udp(client: Rc<RefCell<Client>>, socket: Rc<RefCell<UdpSoc
 
         for msg in messages.iter() {
             let socket = socket.borrow();
-            match socket.send_to(&msg, SocketAddr::new(ip, port)).await {
-                Ok(_) => (),
-                Err(_) => {
-                    log::error!("failed to write to the udp socket");
-                    return;
+            // Important check here to ensure we don't try to send to port 0
+            if port > 0 {
+                match socket.send_to(&msg, SocketAddr::new(ip, port)).await {
+                    Ok(_) => (),
+                    Err(_) => {
+                        log::error!("failed to write to the udp socket");
+                        return;
+                    }
                 }
             }
         }
@@ -432,6 +435,9 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>, clients: Rc<RefCell<HashMap
                 if clients.contains_key(&client_id) {
                     let mut client = clients.get(&client_id).unwrap().borrow_mut();
                     client.udp_port = addr.port(); //set the udp port to send data to
+                    
+                    log::info!("{}: UDP connected for client {}", Local::now().format("%Y-%m-%d %H:%M:%S"), client_id);
+
                     client.message_queue_udp.push(vec![ToClientUDPMessageType::Connected as u8]);
                     client.notify_udp.notify();
                 }
@@ -447,11 +453,29 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>, clients: Rc<RefCell<HashMap
                         buf[0] = ToClientUDPMessageType::DataMessage as u8; //technically unecessary, unless we change this number
                         for (_k, v) in room.clients.iter() {
                             if *_k != client_id {
-                                let mut msg = vec![];
                                 let mut v_ref = v.borrow_mut();
-                                msg.extend_from_slice(&buf[0..packet_size]);
-                                v_ref.message_queue_udp.push(msg);
-                                v_ref.notify_udp.notify();
+                                
+                                // DYNAMIC ROUTING: Check if client has established UDP
+                                if v_ref.udp_port == 0 {
+                                    // REFORMAT FOR TCP: [Type][SenderID][Len][Data]
+                                    let mut tcp_msg = vec![];
+                                    tcp_msg.push(buf[0]); // Type
+                                    tcp_msg.extend_from_slice(&buf[1..5]); // SenderID
+                                    
+                                    // Calculate Data Length (Packet size - Type(1) - SenderID(4))
+                                    let data_len = packet_size as u32 - 5;
+                                    tcp_msg.extend_from_slice(&data_len.to_be_bytes()); // Len
+                                    tcp_msg.extend_from_slice(&buf[5..packet_size]); // Data
+                                    
+                                    v_ref.message_queue.extend_from_slice(&tcp_msg);
+                                    v_ref.notify.notify();
+                                } else {
+                                    // STANDARD UDP ROUTING
+                                    let mut msg = vec![];
+                                    msg.extend_from_slice(&buf[0..packet_size]);
+                                    v_ref.message_queue_udp.push(msg);
+                                    v_ref.notify_udp.notify();
+                                }
                             }
                         }
                     }
@@ -466,16 +490,43 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>, clients: Rc<RefCell<HashMap
                         buf[0] = ToClientUDPMessageType::DataMessage as u8; //technically unecessary, unless we change this number
                         for (_k, v) in room.clients.iter() {
                             if *_k != client_id {
-                                let mut msg = vec![];
                                 let mut v_ref = v.borrow_mut();
-                                msg.extend_from_slice(&buf[0..packet_size]);
-                                v_ref.message_queue_udp.push(msg);
-                                v_ref.notify_udp.notify();
+                                
+                                // DYNAMIC ROUTING: Check if client has established UDP
+                                if v_ref.udp_port == 0 {
+                                    // REFORMAT FOR TCP
+                                    let mut tcp_msg = vec![];
+                                    tcp_msg.push(buf[0]); 
+                                    tcp_msg.extend_from_slice(&buf[1..5]); 
+                                    let data_len = packet_size as u32 - 5;
+                                    tcp_msg.extend_from_slice(&data_len.to_be_bytes()); 
+                                    tcp_msg.extend_from_slice(&buf[5..packet_size]); 
+                                    
+                                    v_ref.message_queue.extend_from_slice(&tcp_msg);
+                                    v_ref.notify.notify();
+                                } else {
+                                    let mut msg = vec![];
+                                    msg.extend_from_slice(&buf[0..packet_size]);
+                                    v_ref.message_queue_udp.push(msg);
+                                    v_ref.notify_udp.notify();
+                                }
                             } else {
-                                let mut msg = vec![];
-                                msg.extend_from_slice(&buf[0..packet_size]);
-                                client.message_queue_udp.push(msg);
-                                client.notify_udp.notify();
+                                // Send back to self
+                                if client.udp_port == 0 {
+                                     let mut tcp_msg = vec![];
+                                    tcp_msg.push(buf[0]); 
+                                    tcp_msg.extend_from_slice(&buf[1..5]); 
+                                    let data_len = packet_size as u32 - 5;
+                                    tcp_msg.extend_from_slice(&data_len.to_be_bytes()); 
+                                    tcp_msg.extend_from_slice(&buf[5..packet_size]); 
+                                    client.message_queue.extend_from_slice(&tcp_msg);
+                                    client.notify.notify();
+                                } else {
+                                    let mut msg = vec![];
+                                    msg.extend_from_slice(&buf[0..packet_size]);
+                                    client.message_queue_udp.push(msg);
+                                    client.notify_udp.notify();
+                                }
                             }
                         }
                     }
@@ -529,16 +580,43 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>, clients: Rc<RefCell<HashMap
                                     }
                                     if !skip_client {
                                         let mut v_ref = v.borrow_mut();
-                                        v_ref.message_queue_udp.push(message_to_send.clone());
-                                        v_ref.notify_udp.notify();
+                                        
+                                        // DYNAMIC ROUTING
+                                        if v_ref.udp_port == 0 {
+                                             // REFORMAT FOR TCP
+                                            let mut tcp_msg = vec![];
+                                            tcp_msg.push(ToClientTCPMessageType::DataMessage as u8);
+                                            tcp_msg.extend([buf[1], buf[2], buf[3], buf[4]]); // Sender
+                                            let data_len = message_bytes.len() as u32;
+                                            tcp_msg.extend_from_slice(&data_len.to_be_bytes()); // Length
+                                            tcp_msg.extend_from_slice(message_bytes); // Data
+
+                                            v_ref.message_queue.extend_from_slice(&tcp_msg);
+                                            v_ref.notify.notify();
+                                        } else {
+                                            v_ref.message_queue_udp.push(message_to_send.clone());
+                                            v_ref.notify_udp.notify();
+                                        }
                                     }
                                 }
                             }
                         }
                         if send_to_client {
                             let mut client = clients.get(&client_id).unwrap().borrow_mut();
-                            client.message_queue_udp.push(message_to_send.clone());
-                            client.notify_udp.notify();
+                            if client.udp_port == 0 {
+                                // REFORMAT FOR TCP
+                                let mut tcp_msg = vec![];
+                                tcp_msg.push(ToClientTCPMessageType::DataMessage as u8);
+                                tcp_msg.extend([buf[1], buf[2], buf[3], buf[4]]); // Sender
+                                let data_len = message_bytes.len() as u32;
+                                tcp_msg.extend_from_slice(&data_len.to_be_bytes()); // Length
+                                tcp_msg.extend_from_slice(message_bytes); // Data
+                                client.message_queue.extend_from_slice(&tcp_msg);
+                                client.notify.notify();
+                            } else {
+                                client.message_queue_udp.push(message_to_send.clone());
+                                client.notify_udp.notify();
+                            }
                         }
                     }
                 }
@@ -553,12 +631,16 @@ async fn read_login_message(mut stream: TcpStream, client: Rc<RefCell<Client>>, 
 
     let username = read_short_string(&mut stream, duration).await?;
     let application = read_short_string(&mut stream, duration).await?;
+    
+    // REVERT: We no longer read capabilities here. We rely on udp_port being 0 or >0
+    
     log::info!("{}: Got application {} and userid {}", Local::now().format("%Y-%m-%d %H:%M:%S"), application, username);
     {
         let mut client = client.borrow_mut();
         client.username = username;
         client.application = application;
         client.logged_in = true;
+        client.udp_port = 0; // Initialize as 0 (TCP mode)
     }
 
 
@@ -906,18 +988,24 @@ fn send_client_master_message(client_ref: &mut Client, master_id: u32) {
     client_ref.notify.notify();
 }
 
-fn send_room_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, rooms: Rc<RefCell<HashMap<String, Rc<RefCell<Room>>>>>, include_sender: bool, _ordered: bool) {
+fn send_room_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, rooms: Rc<RefCell<HashMap<String, Rc<RefCell<Room>>>>>, include_sender: bool, ordered: bool) {
     //this message is 3u8, sender_id_u32, message_len_u32, message_bytes
 
-    let mut write_buf = vec![];
-
-
+    // Formulate TCP Message (Has length)
+    let mut tcp_write_buf = vec![];
     let mut sender_ref = sender.borrow_mut();
-    write_buf.push(ToClientTCPMessageType::DataMessage as u8);
-    write_buf.extend_from_slice(&sender_ref.id.to_be_bytes());
-    write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
-    write_buf.extend_from_slice(message);
+    tcp_write_buf.push(ToClientTCPMessageType::DataMessage as u8);
+    tcp_write_buf.extend_from_slice(&sender_ref.id.to_be_bytes());
+    tcp_write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
+    tcp_write_buf.extend_from_slice(message);
 
+    // Formulate UDP Message (No length)
+    let mut udp_write_buf = vec![];
+    if !ordered {
+        udp_write_buf.push(ToClientTCPMessageType::DataMessage as u8);
+        udp_write_buf.extend_from_slice(&sender_ref.id.to_be_bytes());
+        udp_write_buf.extend_from_slice(message);
+    }
 
     if sender_ref.room_name == "" {
         return;
@@ -925,7 +1013,7 @@ fn send_room_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, rooms: Rc<R
 
 
     if include_sender {
-        sender_ref.message_queue.extend_from_slice(&write_buf);
+        sender_ref.message_queue.extend_from_slice(&tcp_write_buf);
         sender_ref.notify.notify();
     }
 
@@ -935,8 +1023,17 @@ fn send_room_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, rooms: Rc<R
     for (_k, v) in room_ref.clients.iter() {
         if *_k != sender_ref.id {
             let mut temp_mut = v.borrow_mut();
-            temp_mut.message_queue.extend_from_slice(&write_buf);
-            temp_mut.notify.notify();
+            
+            // DYNAMIC ROUTING LOGIC
+            // If ordered (buffered), always TCP.
+            // If unordered (unbuffered), check if client has established UDP (port > 0)
+            if ordered || temp_mut.udp_port == 0 {
+                 temp_mut.message_queue.extend_from_slice(&tcp_write_buf);
+                 temp_mut.notify.notify();
+            } else {
+                 temp_mut.message_queue_udp.push(udp_write_buf.clone());
+                 temp_mut.notify_udp.notify();
+            }
         }
     }
 }
@@ -954,12 +1051,20 @@ fn send_self_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>) {
 }
 
 fn send_group_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, group: &String) {
-    let mut write_buf = vec![];
+    // Formulate TCP Message (Has length)
+    let mut tcp_write_buf = vec![];
     let mut sender_ref = sender.borrow_mut();
-    write_buf.push(ToClientTCPMessageType::DataMessage as u8);
-    write_buf.extend_from_slice(&sender_ref.id.to_be_bytes());
-    write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
-    write_buf.extend_from_slice(message);
+    tcp_write_buf.push(ToClientTCPMessageType::DataMessage as u8);
+    tcp_write_buf.extend_from_slice(&sender_ref.id.to_be_bytes());
+    tcp_write_buf.extend_from_slice(&(message.len() as u32).to_be_bytes());
+    tcp_write_buf.extend_from_slice(message);
+
+     // Formulate UDP Message (No length) - assumed unordered for group unbuffered
+    let mut udp_write_buf = vec![];
+    udp_write_buf.push(ToClientTCPMessageType::DataMessage as u8);
+    udp_write_buf.extend_from_slice(&sender_ref.id.to_be_bytes());
+    udp_write_buf.extend_from_slice(message);
+
 
     //get the list of client ids for this group
     let mut send_to_client = false;
@@ -970,14 +1075,20 @@ fn send_group_message(sender: Rc<RefCell<Client>>, message: &Vec<u8>, group: &St
                 send_to_client = true;
             } else {
                 let mut temp_mut = c.borrow_mut();
-                temp_mut.message_queue.extend_from_slice(&write_buf);
-                temp_mut.notify.notify();
+                // DYNAMIC ROUTING LOGIC
+                if temp_mut.udp_port == 0 {
+                    temp_mut.message_queue.extend_from_slice(&tcp_write_buf);
+                    temp_mut.notify.notify();
+                } else {
+                    temp_mut.message_queue_udp.push(udp_write_buf.clone());
+                    temp_mut.notify_udp.notify();
+                }
             }
         }
     }
 
     if send_to_client {
-        sender_ref.message_queue.extend_from_slice(&write_buf);
+        sender_ref.message_queue.extend_from_slice(&tcp_write_buf);
         sender_ref.notify.notify();
     }
 }
@@ -1015,4 +1126,3 @@ async fn read_vec(stream: &mut TcpStream, duration: u64) -> Result<Vec<u8>, Box<
     read_timeout(stream, &mut message, duration).await?;
     return Ok(message);
 }
-
