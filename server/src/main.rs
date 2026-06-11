@@ -408,6 +408,23 @@ async fn process_udp(socket: Rc<RefCell<UdpSocket>>, clients: Rc<RefCell<HashMap
             let client_id_bytes = [buf[1], buf[2], buf[3], buf[4]];
             let client_id = u32::from_be_bytes(client_id_bytes);
 
+            // Self-heal NAT/firewall remaps: refresh the sender's UDP return path from the
+            // LIVE source address on every data datagram (not just the Connect handshake). A
+            // Wi-Fi roam or symmetric-NAT rebind changes a client's external (ip, port)
+            // mid-session; without this the relay keeps sending that client's inbound traffic
+            // to the dead handshake address and its avatar freezes until the app restarts.
+            if t != FromClientUDPMessageType::Connect as u8 {
+                let clients_ref = clients.borrow();
+                if let Some(c) = clients_ref.get(&client_id) {
+                    let mut c = c.borrow_mut();
+                    if c.udp_port != addr.port() || c.ip != addr.ip() {
+                        log::info!("{}: client {} UDP remap {}:{} -> {} (self-heal)", Local::now().format("%Y-%m-%d %H:%M:%S"), client_id, c.ip, c.udp_port, addr);
+                        c.ip = addr.ip();
+                        c.udp_port = addr.port();
+                    }
+                }
+            }
+
             if t == FromClientUDPMessageType::Connect as u8 { 
                 let clients = clients.borrow();
                 if clients.contains_key(&client_id) {
